@@ -14,53 +14,48 @@
  * limitations under the License.
  */
 
-
 package com.netflix.spinnaker.orca.clouddriver.tasks.providers.aws
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.netflix.spinnaker.orca.clouddriver.OortService
 import com.netflix.spinnaker.orca.clouddriver.tasks.image.ImageTagger
+import com.netflix.spinnaker.orca.clouddriver.tasks.image.ImageTaggerSpec
 import com.netflix.spinnaker.orca.pipeline.model.Orchestration
-import com.netflix.spinnaker.orca.pipeline.model.OrchestrationStage
 import com.netflix.spinnaker.orca.pipeline.model.Pipeline
-import com.netflix.spinnaker.orca.pipeline.model.PipelineStage
-import com.netflix.spinnaker.orca.pipeline.util.StageNavigator
-import org.springframework.context.ApplicationContext
-import spock.lang.Specification
-import spock.lang.Subject
+import com.netflix.spinnaker.orca.pipeline.model.Stage
 import spock.lang.Unroll
 
-class AmazonImageTaggerSpec extends Specification {
+class AmazonImageTaggerSpec extends ImageTaggerSpec<AmazonImageTagger> {
 
   def oortService = Mock(OortService)
 
-  @Subject
-  def imageTagger
-
-  void setup() {
-    imageTagger = new AmazonImageTagger(oortService, new ObjectMapper())
+  @Override
+  protected AmazonImageTagger subject() {
+    def imageTagger = new AmazonImageTagger(oortService, new ObjectMapper())
     imageTagger.defaultBakeAccount = "test"
+    return imageTagger
   }
 
   @Unroll
   def "should throw exception if image does not exist"() {
     given:
     def pipeline = new Pipeline()
-
-    def stage1 = new PipelineStage(pipeline, "", [
+    def stage1 = new Stage<>(pipeline, "", [
       imageId      : imageId,
       cloudProvider: "aws"
     ])
-    def stage2 = new PipelineStage(pipeline, "", [
+    def stage2 = new Stage<>(pipeline, "", [
       imageNames   : imageName ? [imageName] : null,
       cloudProvider: "aws"
     ])
 
     stage1.refId = stage1.id
     stage2.requisiteStageRefIds = [stage1.refId]
-    stage2.stageNavigator = new StageNavigator(Stub(ApplicationContext))
 
     pipeline.stages = [stage1, stage2]
+
+    and:
+    oortService.findImage("aws", "my-ami", null, null, null) >> { [] }
 
     when:
     imageTagger.getOperationContext(stage2)
@@ -68,8 +63,6 @@ class AmazonImageTaggerSpec extends Specification {
     then:
     ImageTagger.ImageNotFound e = thrown(ImageTagger.ImageNotFound)
     e.shouldRetry == shouldRetry
-
-    1 * oortService.findImage("aws", "my-ami", null, null, null) >> { [] }
 
     where:
     imageId  | imageName || shouldRetry
@@ -79,7 +72,7 @@ class AmazonImageTaggerSpec extends Specification {
 
   def "should build upsertMachineImageTags and allowLaunchDescription operations"() {
     given:
-    def stage = new OrchestrationStage(new Orchestration(), "", [
+    def stage = new Stage<>(new Orchestration(), "", [
       imageNames: ["my-ami"],
       tags      : [
         "tag1"      : "value1",

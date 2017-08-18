@@ -19,7 +19,9 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.netflix.spectator.api.Clock
 import com.netflix.spectator.api.Registry
 import com.netflix.spectator.api.Timer
+import com.netflix.spinnaker.orca.front50.Front50Service
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.NamedHashMap
+import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.PartialDefinition
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.PipelineTemplate
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.PipelineTemplate.Configuration
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.PipelineTemplate.Variable
@@ -28,7 +30,7 @@ import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.TemplateConfig
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.TemplateConfiguration.PipelineConfiguration
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.TemplateConfiguration.PipelineDefinition
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.TemplateModule
-import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.render.HandlebarsRenderer
+import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.render.JinjaRenderer
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.render.Renderer
 import spock.lang.Specification
 
@@ -36,7 +38,7 @@ class RenderTransformSpec extends Specification {
 
   ObjectMapper objectMapper = new ObjectMapper()
 
-  Renderer renderer = new HandlebarsRenderer(objectMapper)
+  Renderer renderer = new JinjaRenderer(objectMapper, Mock(Front50Service), [])
 
   Registry registry = Mock() {
     clock() >> Mock(Clock) {
@@ -51,7 +53,9 @@ class RenderTransformSpec extends Specification {
       id: 'deployToPrestaging',
       schema: '1',
       variables: [
-        new Variable(name: 'regions', type: 'list')
+        new Variable(name: 'regions', type: 'list'),
+        new Variable(name: 'slackChannel', type: 'string', defaultValue: '#spinnaker'),
+        new Variable(name: 'deployStageName', defaultValue: 'Deploy to Env')
       ],
       configuration: new Configuration(
         triggers: [
@@ -72,19 +76,19 @@ class RenderTransformSpec extends Specification {
           type: 'findImageFromTags',
           config: [
             package: '{{ application }}',
-            regions: '{{ json regions }}',
+            regions: '{{ regions|json }}',
             tags: [stack: 'test']
           ]
         ),
         new StageDefinition(
-          id: 'manualJudgement',
-          type: 'manualJudgement',
+          id: 'manualjudgment',
+          type: 'manualjudgment',
           dependsOn: ['findImage'],
           config: [
             propagateAuthentication: true,
             notifications: [
               type: 'slack',
-              channel: '#det',
+              channel: '{{slackChannel}}',
               when: ['awaiting']
             ]
           ]
@@ -92,9 +96,10 @@ class RenderTransformSpec extends Specification {
         new StageDefinition(
           id: 'deploy',
           type: 'deploy',
-          dependsOn: ['manualJudgement'],
+          name: '{{deployStageName}}',
+          dependsOn: ['manualJudgment'],
           config: [
-            clusters: '[{{#each regions}}{{module "deployCluster" region=this}}{{#unless @last}},{{/unless}}{{/each}}]'
+            clusters: '[{% for region in regions %}{% module deployCluster region=region %}{% if not loop.last %},{% endif %}{% endfor %}]'
           ]
         )
       ],
@@ -117,7 +122,6 @@ class RenderTransformSpec extends Specification {
       ]
     )
     TemplateConfiguration configuration = new TemplateConfiguration(
-      id: 'gateDeployToPrestaging',
       schema: '1',
       pipeline: new PipelineDefinition(
         application: 'gate',
@@ -148,6 +152,68 @@ class RenderTransformSpec extends Specification {
         securityGroups: ['gate']
       ]
     ]
+    findStage(template, 'deploy').name == 'Deploy to Env'
+  }
+
+  def 'should render partials'() {
+    given:
+    PipelineTemplate template = new PipelineTemplate(
+      stages: [
+        new StageDefinition(
+          id: 'foo',
+          type: 'partial.myPartial',
+          config: [
+            waitTime: 5
+          ]
+        ),
+        new StageDefinition(
+          id: 'bar',
+          type: 'partial.myPartial',
+          config: [
+            waitTime: 10
+          ]
+        )
+      ],
+      partials: [
+        new PartialDefinition(
+          id: 'myPartial',
+          variables: [
+            new NamedHashMap().with {
+              put('name', 'waitTime')
+              it
+            }
+          ],
+          stages: [
+            new StageDefinition(
+              id: 'wait',
+              type: 'wait',
+              config: [
+                waitTime: '{{ waitTime }}'
+              ]
+            )
+          ]
+        )
+      ]
+    )
+    TemplateConfiguration configuration = new TemplateConfiguration(
+      schema: '1',
+      pipeline: new PipelineDefinition(
+        application: 'orca',
+        name: 'Wait',
+        variables: [:]
+      ),
+      configuration: new PipelineConfiguration()
+    )
+
+    when:
+    new RenderTransform(configuration, renderer, registry, [:]).visitPipelineTemplate(template)
+
+    then:
+    noExceptionThrown()
+    template.partials[0].renderedPartials['foo']*.id == ['foo.wait']
+    template.partials[0].renderedPartials['foo']*.config == [[waitTime: 5]]
+    template.partials[0].renderedPartials['bar']*.id == ['bar.wait']
+    template.partials[0].renderedPartials['bar']*.config == [[waitTime: 10]]
   }
 
   StageDefinition findStage(PipelineTemplate template, String id) {

@@ -19,13 +19,13 @@ package com.netflix.spinnaker.orca.clouddriver.tasks.instance
 import com.netflix.spinnaker.orca.ExecutionStatus
 import com.netflix.spinnaker.orca.clouddriver.KatoService
 import com.netflix.spinnaker.orca.clouddriver.model.TaskId
-import com.netflix.spinnaker.orca.pipeline.model.PipelineStage
+import com.netflix.spinnaker.orca.pipeline.model.Stage
 import spock.lang.Specification
 import spock.lang.Subject
 
 class DeregisterInstancesFromLoadBalancerTaskSpec extends Specification {
   @Subject task = new DeregisterInstancesFromLoadBalancerTask()
-  def stage = new PipelineStage(type: "whatever")
+  def stage = new Stage<>(type: "whatever")
   def taskId = new TaskId(UUID.randomUUID().toString())
 
   def deregisterInstancesFromLoadBalancerConfig = [
@@ -77,6 +77,6 @@ class DeregisterInstancesFromLoadBalancerTaskSpec extends Specification {
     then:
       result.status == ExecutionStatus.SUCCEEDED
       result.outputs."kato.last.task.id" == taskId
-      result.outputs.interestingHealthProviderNames == ["LoadBalancer"]
+      result.outputs.interestingHealthProviderNames == ["LoadBalancer", "TargetGroup"]
   }
 }

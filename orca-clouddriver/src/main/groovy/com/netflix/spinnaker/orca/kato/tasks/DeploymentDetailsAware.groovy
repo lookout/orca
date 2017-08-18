@@ -17,11 +17,10 @@
 package com.netflix.spinnaker.orca.kato.tasks
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.module.SimpleModule
+import com.netflix.spinnaker.orca.jackson.OrcaObjectMapper
 import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Orchestration
 import com.netflix.spinnaker.orca.pipeline.model.Pipeline
-import com.netflix.spinnaker.orca.pipeline.model.PipelineStage
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 
 /**
@@ -33,8 +32,7 @@ import com.netflix.spinnaker.orca.pipeline.model.Stage
  */
 trait DeploymentDetailsAware {
 
-  private ObjectMapper pipelineObjectMapper =
-    new ObjectMapper().registerModule(new SimpleModule("MyConverterModule").addAbstractTypeMapping(Stage, PipelineStage))
+  private ObjectMapper pipelineObjectMapper = OrcaObjectMapper.newInstance()
 
   void withImageFromPrecedingStage(
     Stage stage,

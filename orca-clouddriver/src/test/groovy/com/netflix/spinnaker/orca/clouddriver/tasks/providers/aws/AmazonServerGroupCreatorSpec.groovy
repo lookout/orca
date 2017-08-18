@@ -18,7 +18,7 @@ package com.netflix.spinnaker.orca.clouddriver.tasks.providers.aws
 
 import com.google.common.collect.Maps
 import com.netflix.spinnaker.orca.pipeline.model.Pipeline
-import com.netflix.spinnaker.orca.pipeline.model.PipelineStage
+import com.netflix.spinnaker.orca.pipeline.model.Stage
 import spock.lang.Specification
 import spock.lang.Subject
 import spock.lang.Unroll
@@ -27,7 +27,7 @@ class AmazonServerGroupCreatorSpec extends Specification {
 
   @Subject
   def creator = new AmazonServerGroupCreator()
-  def stage = new PipelineStage(new Pipeline(), "whatever")
+  def stage = new Stage<>(new Pipeline(), "whatever")
 
   def deployConfig = [
       application      : "hodor",
@@ -154,6 +154,7 @@ class AmazonServerGroupCreatorSpec extends Specification {
 
   def "create deploy task adds imageId if present in deployment details"() {
     given:
+      deployConfig.credentials = creator.defaultBakeAccount
       stage.context.amiName = null
       stage.context.deploymentDetails = [
           ["imageId": "docker-image-is-not-region-specific", "region": "us-west-1"],
@@ -172,6 +173,26 @@ class AmazonServerGroupCreatorSpec extends Specification {
       amiName = "ami-name-from-bake"
   }
 
+  def "create deploy throws an exception if allowLaunch cannot find an ami"() {
+    given:
+    stage.context.amiName = null
+
+    when:
+    creator.getOperations(stage)
+
+    then:
+    thrown(IllegalStateException)
+  }
+
+  def "create deploy adds an allowLaunch operation if needed"() {
+    when:
+    def operations = creator.getOperations(stage)
+
+    then:
+    operations.size() == 2
+    operations[0].containsKey("allowLaunchDescription")
+  }
+
   @Unroll
   def "prefers the deployment details from an upstream stage to one from global context"() {
     given:
@@ -184,12 +205,12 @@ class AmazonServerGroupCreatorSpec extends Specification {
 
     and:
     def findImageStage =
-      new PipelineStage(stage.execution, "findImage", [regions: [deployRegion], amiDetails: [[ami: amiName]], cloudProvider: cloudProvider])
+      new Stage<>(stage.execution, "findImage", [regions: [deployRegion], amiDetails: [[ami: amiName]], cloudProvider: cloudProvider])
     findImageStage.id = UUID.randomUUID()
     findImageStage.refId = "1a"
     stage.execution.stages << findImageStage
 
-    def intermediateStage = new PipelineStage(stage.execution, "whatever")
+    def intermediateStage = new Stage<>(stage.execution, "whatever")
     intermediateStage.id = UUID.randomUUID()
     intermediateStage.refId = "1b"
     stage.execution.stages << intermediateStage

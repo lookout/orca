@@ -18,6 +18,7 @@ package com.netflix.spinnaker.orca.bakery.api
 
 import com.fasterxml.jackson.annotation.JsonAnyGetter
 import com.fasterxml.jackson.annotation.JsonAnySetter
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.PropertyNamingStrategy
 import groovy.transform.CompileStatic
@@ -56,6 +57,9 @@ class BakeRequest {
   Boolean enhancedNetworking
   String amiName
   String amiSuffix
+
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  Integer rootVolumeSize
 
   private Map<String, Object> other = new HashMap<String, Object>()
 

@@ -1,9 +1,12 @@
 package com.netflix.spinnaker.orca.echo.spring
 
-import com.netflix.spinnaker.orca.ExecutionStatus
 import com.netflix.spinnaker.orca.echo.EchoService
 import com.netflix.spinnaker.orca.listeners.Persister
-import com.netflix.spinnaker.orca.pipeline.model.*
+import com.netflix.spinnaker.orca.pipeline.model.Orchestration
+import com.netflix.spinnaker.orca.pipeline.model.Pipeline
+import com.netflix.spinnaker.orca.pipeline.model.Stage
+import com.netflix.spinnaker.orca.pipeline.model.Task
+import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository
 import spock.lang.Shared
 import spock.lang.Specification
 import spock.lang.Subject
@@ -14,19 +17,20 @@ class EchoNotifyingStageListenerSpec extends Specification {
 
   def echoService = Mock(EchoService)
   def persister = Stub(Persister)
+  def repository = Mock(ExecutionRepository)
 
   @Subject
-  def echoListener = new EchoNotifyingStageListener(echoService)
+  def echoListener = new EchoNotifyingStageListener(echoService, repository)
 
   @Shared
-  def pipelineStage = new PipelineStage(new Pipeline(), "test", "test", [:])
+  def pipelineStage = new Stage<>(new Pipeline(), "test", "test", [:])
 
   @Shared
-  def orchestrationStage = new OrchestrationStage(new Orchestration(), "test")
+  def orchestrationStage = new Stage<>(new Orchestration(), "test")
 
   def "triggers an event when a task step starts"() {
     given:
-    def task = new DefaultTask(status: ExecutionStatus.NOT_STARTED)
+    def task = new Task(status: NOT_STARTED)
 
     when:
     echoListener.beforeTask(persister, pipelineStage, task)
@@ -37,7 +41,7 @@ class EchoNotifyingStageListenerSpec extends Specification {
 
   def "triggers an event when a stage starts"() {
     given:
-    def task = new DefaultTask(stageStart: true)
+    def task = new Task(stageStart: true)
 
     when:
     echoListener.beforeStage(persister, pipelineStage)
@@ -48,7 +52,7 @@ class EchoNotifyingStageListenerSpec extends Specification {
 
   def "triggers an event when a task starts"() {
     given:
-    def task = new DefaultTask(stageStart: false)
+    def task = new Task(stageStart: false)
 
     and:
     def events = []
@@ -65,7 +69,7 @@ class EchoNotifyingStageListenerSpec extends Specification {
   @Unroll
   def "triggers an event when a task completes"() {
     given:
-    def task = new DefaultTask(name: taskName, stageEnd: isEnd)
+    def task = new Task(name: taskName, stageEnd: isEnd)
 
     when:
     echoListener.afterTask(persister, stage, task, executionStatus, wasSuccessful)
@@ -103,7 +107,7 @@ class EchoNotifyingStageListenerSpec extends Specification {
   @Unroll
   def "sends the correct data to echo when the task completes"() {
     given:
-    def task = new DefaultTask(name: taskName)
+    def task = new Task(name: taskName)
 
     and:
     def message

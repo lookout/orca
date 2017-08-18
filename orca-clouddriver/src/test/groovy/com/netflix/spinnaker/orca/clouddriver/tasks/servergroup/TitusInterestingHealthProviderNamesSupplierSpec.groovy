@@ -20,7 +20,7 @@ import com.netflix.spinnaker.orca.clouddriver.OortService
 import com.netflix.spinnaker.orca.jackson.OrcaObjectMapper
 import com.netflix.spinnaker.orca.kato.pipeline.support.SourceResolver
 import com.netflix.spinnaker.orca.pipeline.model.Pipeline
-import com.netflix.spinnaker.orca.pipeline.model.PipelineStage
+import com.netflix.spinnaker.orca.pipeline.model.Stage
 import retrofit.client.Response
 import retrofit.mime.TypedString
 import spock.lang.Specification
@@ -29,32 +29,33 @@ import spock.lang.Unroll
 
 class TitusInterestingHealthProviderNamesSupplierSpec extends Specification {
   def oortService = Mock(OortService)
-  def mapper = new OrcaObjectMapper()
+  def mapper = OrcaObjectMapper.newInstance()
 
   @Subject
   def titusInterestingHealthProviderNamesSupplier = new TitusInterestingHealthProviderNamesSupplier(oortService, new SourceResolver(), mapper)
 
   @Unroll
-  def "should only support if cloudProvider is titus and stage type in (rollingPush)"() {
+  def "should only support if cloudProvider is titus and stage type in [enableServerGroup, cloneServerGroup]"() {
     given:
-    def stage = new PipelineStage(new Pipeline(), stageType, stageContext)
+    def stage = new Stage<>(new Pipeline(), stageType, stageContext)
 
     expect:
     titusInterestingHealthProviderNamesSupplier.supports(cloudProvider, stage) == supports
 
     where:
     cloudProvider | stageType           | stageContext                || supports
-    "titus"       | "createServerGroup" | [strategy: "rollingpush"]   || false
-    "titus"       | "enableServerGroup" | [strategy: "rollingpush"]   || false
-    "titus"       | "cloneServerGroup"  | [strategy: "rollingpush"]   || false
-    "titus"       | "rollingPush"       | [strategy: "rollingpush"]   || true
-    "titus"       | "createServerGroup" | [strategy: "custom"]        || false
+    "titus"       | "cloneServerGroup"  | [strategy: "rollingpush"]   || true
+    "titus"       | "enableServerGroup" | [strategy: "rollingpush"]   || true
+    "titus"       | "cloneServerGroup"  | [strategy: "rollingpush"]   || true
+    "titus"       | "cloneServerGroup"  | [strategy: "redBlack"]      || true
+    "aws"         | "cloneServerGroup"  | [strategy: "redBlack"]      || false
+    "aws"         | "destroyServerGroup"| [:]                         || false
   }
 
   @Unroll
   def "should process interestingHealthNames by inspecting labels on titus serverGroup"() {
     given:
-    def stage = new PipelineStage(new Pipeline(), "createServerGroup", stageContext)
+    def stage = new Stage<>(new Pipeline(), "createServerGroup", stageContext)
     def response = mapper.writeValueAsString([
       application: "app",
       region: "region",

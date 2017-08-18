@@ -17,15 +17,11 @@
 package com.netflix.spinnaker.orca.clouddriver.config
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.netflix.spinnaker.orca.clouddriver.CloudDriverCacheStatusService
-import com.netflix.spinnaker.orca.clouddriver.FeaturesRestService
-import com.netflix.spinnaker.orca.clouddriver.KatoRestService
-import com.netflix.spinnaker.orca.clouddriver.MortService
-import com.netflix.spinnaker.orca.clouddriver.OortService
-import com.netflix.spinnaker.orca.clouddriver.CloudDriverCacheService
+import com.netflix.spinnaker.orca.clouddriver.*
 import com.netflix.spinnaker.orca.jackson.OrcaObjectMapper
 import com.netflix.spinnaker.orca.retrofit.RetrofitConfiguration
 import com.netflix.spinnaker.orca.retrofit.logging.RetrofitSlf4jLog
+import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
@@ -38,6 +34,9 @@ import retrofit.RequestInterceptor
 import retrofit.RestAdapter
 import retrofit.client.Client
 import retrofit.converter.JacksonConverter
+
+import java.util.regex.Pattern
+
 import static retrofit.Endpoints.newFixedEndpoint
 
 @Configuration
@@ -58,7 +57,7 @@ class CloudDriverConfiguration {
   @ConditionalOnMissingBean(ObjectMapper)
   @Bean
   ObjectMapper mapper() {
-    new OrcaObjectMapper()
+    OrcaObjectMapper.newInstance()
   }
 
   @Bean
@@ -106,18 +105,32 @@ class CloudDriverConfiguration {
           .create(type)
     }
 
-    public <T> T buildReadOnlyService(Class<T> type) {
-      if (cloudDriverConfigurationProperties.cloudDriverReadOnlyBaseUrl == cloudDriverConfigurationProperties.cloudDriverBaseUrl) {
+    @CompileDynamic
+    private <T> SelectableService buildReadOnlyService(Class<T> type) {
+      if (cloudDriverConfigurationProperties.cloudDriverReadOnlyBaseUrls*.baseUrl == [cloudDriverConfigurationProperties.cloudDriverBaseUrl]) {
         log.info("readonly URL not configured for clouddriver, using writeable clouddriver $cloudDriverConfigurationProperties.cloudDriverBaseUrl for $type.simpleName")
       }
 
-      return buildService(type, cloudDriverConfigurationProperties.cloudDriverReadOnlyBaseUrl)
+      return new SelectableService(
+        cloudDriverConfigurationProperties.cloudDriverReadOnlyBaseUrls.collect {
+          def selector = new DefaultServiceSelector(buildService(type, it.baseUrl), it.priority, it.config)
+
+          def selectorClass = it.config?.selectorClass as Class<ServiceSelector>
+          if (selectorClass) {
+            selector = selectorClass.getConstructors()[0].newInstance(
+              selector.service, it.priority, it.config
+            )
+          }
+
+          selector
+        }
+      )
     }
   }
 
   @Bean
   MortService mortDeployService(ClouddriverRetrofitBuilder builder) {
-    return builder.buildReadOnlyService(MortService)
+    return new DelegatingMortService(builder.buildReadOnlyService(MortService))
   }
 
   @Bean
@@ -127,17 +140,22 @@ class CloudDriverConfiguration {
 
   @Bean
   CloudDriverCacheStatusService cloudDriverCacheStatusService(ClouddriverRetrofitBuilder builder) {
-    return builder.buildReadOnlyService(CloudDriverCacheStatusService)
+    return new DelegatingCloudDriverCacheStatusService(builder.buildReadOnlyService(CloudDriverCacheStatusService))
   }
 
   @Bean
   OortService oortDeployService(ClouddriverRetrofitBuilder builder) {
-    return builder.buildReadOnlyService(OortService)
+    return new DelegatingOortService(builder.buildReadOnlyService(OortService))
   }
 
   @Bean
   KatoRestService katoDeployService(ClouddriverRetrofitBuilder builder) {
     return builder.buildWriteableService(KatoRestService)
+  }
+
+  @Bean
+  CloudDriverTaskStatusService cloudDriverTaskStatusService(ClouddriverRetrofitBuilder builder) {
+    return new DelegatingCloudDriverTaskStatusService(builder.buildReadOnlyService(CloudDriverTaskStatusService))
   }
 
   @Bean

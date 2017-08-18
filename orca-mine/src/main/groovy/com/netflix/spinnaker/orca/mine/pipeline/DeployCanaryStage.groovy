@@ -16,13 +16,13 @@
 
 package com.netflix.spinnaker.orca.mine.pipeline
 
-import com.netflix.spinnaker.orca.clouddriver.MortService
 import com.netflix.frigga.NameBuilder
 import com.netflix.frigga.ami.AppVersion
 import com.netflix.spinnaker.orca.CancellableStage
-import com.netflix.spinnaker.orca.DefaultTaskResult
 import com.netflix.spinnaker.orca.ExecutionStatus
+import com.netflix.spinnaker.orca.Task
 import com.netflix.spinnaker.orca.TaskResult
+import com.netflix.spinnaker.orca.clouddriver.MortService
 import com.netflix.spinnaker.orca.clouddriver.tasks.cluster.FindImageFromClusterTask
 import com.netflix.spinnaker.orca.clouddriver.utils.CloudProviderAware
 import com.netflix.spinnaker.orca.kato.pipeline.ParallelDeployStage
@@ -30,7 +30,10 @@ import com.netflix.spinnaker.orca.kato.tasks.DiffTask
 import com.netflix.spinnaker.orca.mine.MineService
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
 import com.netflix.spinnaker.orca.pipeline.TaskNode
-import com.netflix.spinnaker.orca.pipeline.model.*
+import com.netflix.spinnaker.orca.pipeline.model.Execution
+import com.netflix.spinnaker.orca.pipeline.model.Orchestration
+import com.netflix.spinnaker.orca.pipeline.model.Pipeline
+import com.netflix.spinnaker.orca.pipeline.model.Stage
 import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
@@ -62,7 +65,7 @@ class DeployCanaryStage extends ParallelDeployStage implements CloudProviderAwar
   }
 
   @Override
-  <T extends Execution<T>> void postBranchGraph(Stage<T> stage, TaskNode.Builder builder) {
+  void postBranchGraph(Stage<?> stage, TaskNode.Builder builder) {
     builder.withTask("completeDeployCanary", CompleteDeployCanaryTask)
   }
 
@@ -106,7 +109,7 @@ class DeployCanaryStage extends ParallelDeployStage implements CloudProviderAwar
     }.flatten()
 
     def findImageCtx = [application: stage.execution.application, account: stage.context.baseline.account, cluster: stage.context.baseline.cluster, regions: regions, cloudProvider: stage.context.baseline.cloudProvider ?: 'aws']
-    Stage s = new OrchestrationStage(new Orchestration(), "findImage", findImageCtx)
+    Stage s = new Stage<>(new Orchestration(), "findImage", findImageCtx)
     TaskResult result = findImage.execute(s)
     try {
       return result.stageOutputs.amiDetails
@@ -133,7 +136,7 @@ class DeployCanaryStage extends ParallelDeployStage implements CloudProviderAwar
 
   @Component
   @Slf4j
-  static class CompleteDeployCanaryTask implements com.netflix.spinnaker.orca.Task {
+  static class CompleteDeployCanaryTask implements Task {
 
     private final List<DiffTask> diffTasks
 
@@ -150,7 +153,12 @@ class DeployCanaryStage extends ParallelDeployStage implements CloudProviderAwar
       def context = stage.context
       def allStages = stage.execution.stages
       def deployStages = allStages.findAll {
-        it.parentStageId == stage.id && it.type == ParallelDeployStage.PIPELINE_CONFIG_TYPE
+        it.parentStageId == stage.id
+      }
+      // if the canary is configured to continue on failure, we need to short-circuit if one of the deploys failed
+      def unsuccessfulDeployStage = deployStages.find { s -> s.status != ExecutionStatus.SUCCEEDED }
+      if (unsuccessfulDeployStage) {
+        return new TaskResult(ExecutionStatus.TERMINAL)
       }
       def deployedClusterPairs = []
       for (Map pair in context.clusterPairs) {
@@ -205,7 +213,7 @@ class DeployCanaryStage extends ParallelDeployStage implements CloudProviderAwar
       log.info("Completed Canary Deploys")
       Map canary = stage.context.canary
       canary.canaryDeployments = deployedClusterPairs
-      new DefaultTaskResult(ExecutionStatus.SUCCEEDED, [canary: canary, deployedClusterPairs: deployedClusterPairs])
+      new TaskResult(ExecutionStatus.SUCCEEDED, [canary: canary, deployedClusterPairs: deployedClusterPairs])
     }
   }
 

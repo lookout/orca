@@ -21,7 +21,7 @@ import com.netflix.spinnaker.orca.ExecutionStatus
 import com.netflix.spinnaker.orca.clouddriver.OortService
 import com.netflix.spinnaker.orca.jackson.OrcaObjectMapper
 import com.netflix.spinnaker.orca.pipeline.model.Orchestration
-import com.netflix.spinnaker.orca.pipeline.model.OrchestrationStage
+import com.netflix.spinnaker.orca.pipeline.model.Stage
 import retrofit.client.Response
 import retrofit.mime.TypedString
 import spock.lang.Shared
@@ -30,7 +30,7 @@ import spock.lang.Subject
 
 class WaitForAppEngineServerGroupStartTaskSpec extends Specification {
   @Shared OortService oort
-  @Shared ObjectMapper mapper = new OrcaObjectMapper()
+  @Shared ObjectMapper mapper = OrcaObjectMapper.newInstance()
   @Subject WaitForAppEngineServerGroupStartTask task = new WaitForAppEngineServerGroupStartTask() {
     {
       objectMapper = mapper
@@ -53,7 +53,7 @@ class WaitForAppEngineServerGroupStartTaskSpec extends Specification {
         cloudProvider: "appengine"
       ]
 
-      def stage = new OrchestrationStage(new Orchestration(), "waitForServerGroupStart", context)
+      def stage = new Stage<>(new Orchestration(), "waitForServerGroupStart", context)
 
     when:
       def result = task.execute(stage)

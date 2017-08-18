@@ -17,37 +17,43 @@ package com.netflix.spinnaker.orca.pipelinetemplate.v1schema.validator;
 
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.TemplateConfiguration;
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.TemplateConfiguration.PipelineDefinition;
+import com.netflix.spinnaker.orca.pipelinetemplate.validator.EmptyValidatorContext;
 import com.netflix.spinnaker.orca.pipelinetemplate.validator.Errors;
 import com.netflix.spinnaker.orca.pipelinetemplate.validator.Errors.Error;
 import com.netflix.spinnaker.orca.pipelinetemplate.validator.Errors.Severity;
 import com.netflix.spinnaker.orca.pipelinetemplate.validator.SchemaValidator;
+import com.netflix.spinnaker.orca.pipelinetemplate.validator.ValidatorContext;
 import com.netflix.spinnaker.orca.pipelinetemplate.validator.VersionedSchema;
 
 public class V1TemplateConfigurationSchemaValidator implements SchemaValidator {
 
   private static final String SUPPORTED_VERSION = "1";
 
-  @Override
   public void validate(VersionedSchema configuration, Errors errors) {
+    validate(configuration, errors, new EmptyValidatorContext());
+  }
+
+  @Override
+  public void validate(VersionedSchema configuration, Errors errors, ValidatorContext context) {
     if (!(configuration instanceof TemplateConfiguration)) {
       throw new IllegalArgumentException("Expected TemplateConfiguration");
     }
     TemplateConfiguration config = (TemplateConfiguration) configuration;
 
     if (!SUPPORTED_VERSION.equals(config.getSchemaVersion())) {
-      errors.addError(Error.builder()
+      errors.add(new Error()
         .withMessage("config schema version is unsupported: expected '" + SUPPORTED_VERSION + "', got '" + config.getSchemaVersion() + "'"));
     }
 
     PipelineDefinition pipelineDefinition = config.getPipeline();
     if (pipelineDefinition == null) {
-      errors.addError(Error.builder()
+      errors.add(new Error()
         .withMessage("Missing pipeline configuration")
         .withLocation(location("pipeline"))
       );
     } else {
       if (pipelineDefinition.getApplication() == null) {
-        errors.addError(Error.builder()
+        errors.add(new Error()
           .withMessage("Missing 'application' pipeline configuration")
           .withLocation(location("pipeline.application"))
         );
@@ -58,7 +64,7 @@ public class V1TemplateConfigurationSchemaValidator implements SchemaValidator {
 
     config.getStages().forEach(s -> {
       if ((s.getDependsOn() == null || s.getDependsOn().isEmpty()) && (s.getInject() == null || !s.getInject().hasAny())) {
-        errors.addError(Error.builder()
+        errors.add(new Error()
           .withMessage("A configuration-defined stage should have either dependsOn or an inject rule defined")
           .withLocation(location(String.format("stages.%s", s.getId())))
           .withSeverity(Severity.WARN));

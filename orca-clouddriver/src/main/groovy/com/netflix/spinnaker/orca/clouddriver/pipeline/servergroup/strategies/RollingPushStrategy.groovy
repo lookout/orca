@@ -16,16 +16,16 @@
 
 package com.netflix.spinnaker.orca.clouddriver.pipeline.servergroup.strategies
 
-import groovy.transform.Immutable
 import com.netflix.spinnaker.orca.kato.pipeline.ModifyAsgLaunchConfigurationStage
 import com.netflix.spinnaker.orca.kato.pipeline.RollingPushStage
 import com.netflix.spinnaker.orca.kato.pipeline.support.SourceResolver
 import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner
+import groovy.transform.Immutable
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Component
-import static com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder.StageDefinitionBuilderSupport.newStage
+import static com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder.newStage
 
 @Component
 @Deprecated
@@ -46,6 +46,10 @@ class RollingPushStrategy implements Strategy {
   <T extends Execution<T>> List<Stage<T>> composeFlow(Stage<T> stage) {
     def stages = []
     def source = sourceResolver.getSource(stage)
+
+    if (!source) {
+      throw new IllegalArgumentException("Could not find source server group for rolling push. Does the specified cluster exist?")
+    }
 
     def modifyCtx = stage.context + [
         region: source.region,

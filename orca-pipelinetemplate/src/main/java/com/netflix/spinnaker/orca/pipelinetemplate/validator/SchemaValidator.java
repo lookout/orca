@@ -15,7 +15,7 @@
  */
 package com.netflix.spinnaker.orca.pipelinetemplate.validator;
 
-public interface SchemaValidator {
+public interface SchemaValidator<T extends ValidatorContext> {
 
-  void validate(VersionedSchema versionedSchema, Errors errors);
+  void validate(VersionedSchema versionedSchema, Errors errors, T context);
 }

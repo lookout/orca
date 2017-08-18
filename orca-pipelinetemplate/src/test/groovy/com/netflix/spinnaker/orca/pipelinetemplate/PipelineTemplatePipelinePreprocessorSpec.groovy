@@ -20,13 +20,15 @@ import com.netflix.spectator.api.Clock
 import com.netflix.spectator.api.Registry
 import com.netflix.spectator.api.Timer
 import com.netflix.spinnaker.orca.extensionpoint.pipeline.PipelinePreprocessor
+import com.netflix.spinnaker.orca.front50.Front50Service
 import com.netflix.spinnaker.orca.pipelinetemplate.loader.FileTemplateSchemeLoader
 import com.netflix.spinnaker.orca.pipelinetemplate.loader.TemplateLoader
-import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.render.HandlebarsRenderer
+import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.render.JinjaRenderer
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.render.Renderer
 import org.unitils.reflectionassert.ReflectionComparatorMode
 import spock.lang.Specification
 import spock.lang.Subject
+import spock.lang.Unroll
 
 import static org.unitils.reflectionassert.ReflectionAssert.assertReflectionEquals
 
@@ -36,7 +38,7 @@ class PipelineTemplatePipelinePreprocessorSpec extends Specification {
 
   TemplateLoader templateLoader = new TemplateLoader([new FileTemplateSchemeLoader(objectMapper)])
 
-  Renderer renderer = new HandlebarsRenderer(objectMapper)
+  Renderer renderer = new JinjaRenderer(objectMapper, Mock(Front50Service), [])
 
   Registry registry = Mock() {
     clock() >> Mock(Clock) {
@@ -98,7 +100,6 @@ class PipelineTemplatePipelinePreprocessorSpec extends Specification {
     then:
     def expected = [
       id: null,
-      executionEngine: 'v2',
       application: 'myapp',
       name: 'Unnamed Execution',
       keepWaitingPipelines: false,
@@ -160,16 +161,69 @@ class PipelineTemplatePipelinePreprocessorSpec extends Specification {
     result.errors*.message.contains("failed loading template")
   }
 
-  def 'should not render unknown handlebars identifiers'() {
+  @Unroll
+  def 'should not render falsy conditional stages'() {
     when:
-    def result = subject.process(createTemplateRequest('invalid-handlebars-001.yml', [:], [], true))
+    def result = subject.process(createTemplateRequest('conditional-stages-001.yml', [includeWait: includeWait]))
+
+    then:
+    result.stages*.name == expectedStageNames
+
+    where:
+    includeWait || expectedStageNames
+    true        || ['wait', 'conditionalWait']
+    false       || ['wait']
+  }
+
+  @Unroll
+  def 'should preserve children stages of conditional stage'() {
+    when:
+    def result = subject.process(createTemplateRequest('conditional-stages-with-children-001.yml', [includeWait: includeWait]))
+
+    then:
+    result.stages*.name == expectedStageNames
+
+    and:
+    result.stages.find { it.name == 'childOfConditionalStage' }.requisiteStageRefIds == childStageRequisiteRefIds as Set
+
+    where:
+    includeWait || childStageRequisiteRefIds  || expectedStageNames
+    true        || ['conditionalWait']        || ['wait', 'conditionalWait', 'childOfConditionalStage']
+    false       || ['wait']                   || ['wait', 'childOfConditionalStage']
+  }
+
+  @Unroll
+  def 'should be able to set source using jinja'() {
+    when:
+    def result = subject.process(createInjectedTemplateRequest(template))
+
+    then:
+    result.stages*.name == expectedStageNames
+
+    where:
+    template        || expectedStageNames
+    'jinja-001.yml' || ['jinja1']
+    'jinja-002.yml' || ['jinja2']
+  }
+
+  def 'should allow inlined templates during plan'() {
+    when:
+    def result = subject.process(createInlinedTemplateRequest(true))
 
     then:
     noExceptionThrown()
-    result.stages[0].regions == '{{unknown_identifier}}'
+    0 * templateLoader.load(_)
+    result.stages*.name == ['wait']
+
+    when:
+    result = subject.process(createInlinedTemplateRequest(false))
+
+    then:
+    result.errors != null
   }
 
-  Map<String, Object> createTemplateRequest(String templatePath, Map<String, Object> variables = [:], List<Map<String, Object>> stages = [:], boolean plan = false) {
+
+  Map<String, Object> createTemplateRequest(String templatePath, Map<String, Object> variables = [:], List<Map<String, Object>> stages = [], boolean plan = false) {
     return [
       type: 'templatedPipeline',
       trigger: [
@@ -180,7 +234,6 @@ class PipelineTemplatePipelinePreprocessorSpec extends Specification {
       ],
       config: [
         schema: '1',
-        id: 'myTemplate',
         pipeline: [
           application: 'myapp',
           template: [
@@ -189,6 +242,53 @@ class PipelineTemplatePipelinePreprocessorSpec extends Specification {
           variables: variables
         ],
         stages: stages
+      ],
+      plan: plan
+    ]
+  }
+
+  Map<String, Object> createInjectedTemplateRequest(String templatePath) {
+    return [
+      type: 'templatedPipeline',
+      trigger: [
+        parameters: [
+          template: getClass().getResource("/templates/${templatePath}").toURI()
+        ]
+      ],
+      config: [
+        schema: '1',
+        pipeline: [
+          application: 'myapp',
+          template: [
+            source: '{{trigger.parameters.template}}'
+          ],
+        ],
+      ],
+      plan: false
+    ]
+  }
+
+  Map<String, Object> createInlinedTemplateRequest(boolean plan) {
+    return [
+      type: 'templatedPipeline',
+      config: [
+        schema: '1',
+        pipeline: [
+          application: 'myapp'
+        ]
+      ],
+      template: [
+        schema: '1',
+        id: 'myTemplate',
+        stages: [
+          [
+            id: 'wait',
+            type: 'wait',
+            config: [
+              waitTime: 5
+            ]
+          ]
+        ]
       ],
       plan: plan
     ]

@@ -19,14 +19,9 @@ package com.netflix.spinnaker.orca.bakery.tasks
 import com.netflix.spinnaker.orca.bakery.api.BakeRequest
 import com.netflix.spinnaker.orca.bakery.api.BakeStatus
 import com.netflix.spinnaker.orca.bakery.api.BakeryService
-import com.netflix.spinnaker.orca.bakery.api.BaseImage
 import com.netflix.spinnaker.orca.jackson.OrcaObjectMapper
-import com.netflix.spinnaker.orca.pipeline.model.*
-import com.netflix.spinnaker.orca.pipeline.util.PackageType
 import com.netflix.spinnaker.orca.pipeline.model.Orchestration
-import com.netflix.spinnaker.orca.pipeline.model.OrchestrationStage
 import com.netflix.spinnaker.orca.pipeline.model.Pipeline
-import com.netflix.spinnaker.orca.pipeline.model.PipelineStage
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import retrofit.RetrofitError
 import retrofit.client.Response
@@ -46,7 +41,7 @@ class CreateBakeTaskSpec extends Specification {
   @Subject
   task = new CreateBakeTask()
   Stage stage
-  def mapper = new OrcaObjectMapper()
+  def mapper = OrcaObjectMapper.newInstance()
 
   @Shared
   def runningStatus = new BakeStatus(id: randomUUID(), state: RUNNING)
@@ -193,7 +188,7 @@ class CreateBakeTaskSpec extends Specification {
 
   def setup() {
     task.mapper = mapper
-    stage = new PipelineStage(pipeline, "bake", bakeConfig)
+    stage = new Stage<>(pipeline, "bake", bakeConfig)
   }
 
   def "creates a bake for the correct region"() {
@@ -245,10 +240,10 @@ class CreateBakeTaskSpec extends Specification {
   @Unroll
   def "finds package details from context and trigger"() {
     given:
-    Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
+    Pipeline pipelineWithTrigger = Pipeline.builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
+    Stage stage = new Stage<>(pipelineWithTrigger, "bake", bakeConfig)
     def bake
     task.bakery = Mock(BakeryService) {
       1 * createBake(*_) >> {
@@ -276,9 +271,9 @@ class CreateBakeTaskSpec extends Specification {
   @Unroll
   def "fails if pipeline trigger or context includes artifacts but no artifact for the bake package"() {
     given:
-    Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
     bakeConfig.buildInfo = contextInfo
+    Pipeline pipelineWithTrigger = Pipeline.builder().withTrigger([buildInfo: triggerInfo]).build()
+    Stage stage = new Stage<>(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Mock(BakeryService)
 
     when:
@@ -300,9 +295,6 @@ class CreateBakeTaskSpec extends Specification {
   @Unroll
   def "fails if pipeline trigger and context includes artifacts have a different match"() {
     given:
-    Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: buildInfo]).build()
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
-    task.bakery = Mock(BakeryService)
     bakeConfig.buildInfo = [
       artifacts: [
         [fileName: 'hodor_1.2_all.deb'],
@@ -310,6 +302,9 @@ class CreateBakeTaskSpec extends Specification {
         [fileName: 'hodor.1.2.nupkg']
       ]
     ]
+    Pipeline pipelineWithTrigger = Pipeline.builder().withTrigger([buildInfo: buildInfo]).build()
+    Stage stage = new Stage<>(pipelineWithTrigger, "bake", bakeConfig)
+    task.bakery = Mock(BakeryService)
 
     when:
     task.execute(stage)
@@ -351,10 +346,10 @@ class CreateBakeTaskSpec extends Specification {
   @Unroll
   def "build info with url yields bake stage output containing build host, job and build number"() {
     given:
-    Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
+    Pipeline pipelineWithTrigger = Pipeline.builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
+    Stage stage = new Stage<>(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Stub(BakeryService) {
       createBake(*_) >> Observable.from(runningStatus)
     }
@@ -381,10 +376,10 @@ class CreateBakeTaskSpec extends Specification {
   @Unroll
   def "build info with url and scm yields bake stage output containing build host, job, build number and commit hash"() {
     given:
-    Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
+    Pipeline pipelineWithTrigger = Pipeline.builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
+    Stage stage = new Stage<>(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Stub(BakeryService) {
       createBake(*_) >> Observable.from(runningStatus)
     }
@@ -409,10 +404,10 @@ class CreateBakeTaskSpec extends Specification {
   @Unroll
   def "build info with url and two scms yields bake stage output containing build host, job, build number and correctly-chosen commit hash"() {
     given:
-    Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
+    Pipeline pipelineWithTrigger = Pipeline.builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
+    Stage stage = new Stage<>(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Stub(BakeryService) {
       createBake(*_) >> Observable.from(runningStatus)
     }
@@ -437,10 +432,10 @@ class CreateBakeTaskSpec extends Specification {
   @Unroll
   def "build info with url and master and develop scms yields bake stage output containing build host, job, build number and first commit hash"() {
     given:
-    Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
+    Pipeline pipelineWithTrigger = Pipeline.builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
+    Stage stage = new Stage<>(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Stub(BakeryService) {
       createBake(*_) >> Observable.from(runningStatus)
     }
@@ -465,10 +460,10 @@ class CreateBakeTaskSpec extends Specification {
   @Unroll
   def "build info without url yields bake stage output without build host, job, build number and commit hash"() {
     given:
-    Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
+    Pipeline pipelineWithTrigger = Pipeline.builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
+    Stage stage = new Stage<>(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Stub(BakeryService) {
       createBake(*_) >> Observable.from(runningStatus)
     }
@@ -495,10 +490,10 @@ class CreateBakeTaskSpec extends Specification {
   @Unroll
   def "build info with url yields bake request containing build host, job and build number"() {
     given:
-    Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
+    Pipeline pipelineWithTrigger = Pipeline.builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
+    Stage stage = new Stage<>(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Mock(BakeryService)
     task.extractBuildDetails = true
 
@@ -528,10 +523,10 @@ class CreateBakeTaskSpec extends Specification {
   @Unroll
   def "build info with url but without extractBuildDetails yields bake request without build host, job, build number, and commit hash"() {
     given:
-    Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
+    Pipeline pipelineWithTrigger = Pipeline.builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
+    Stage stage = new Stage<>(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Mock(BakeryService)
 
     when:
@@ -560,10 +555,10 @@ class CreateBakeTaskSpec extends Specification {
   @Unroll
   def "build info without url yields bake request without build host, job, build number and commit hash"() {
     given:
-    Pipeline pipelineWithTrigger = new Pipeline.Builder().withTrigger([buildInfo: triggerInfo]).build()
+    Pipeline pipelineWithTrigger = Pipeline.builder().withTrigger([buildInfo: triggerInfo]).build()
     bakeConfig.buildInfo = contextInfo
 
-    Stage stage = new PipelineStage(pipelineWithTrigger, "bake", bakeConfig)
+    Stage stage = new Stage<>(pipelineWithTrigger, "bake", bakeConfig)
     task.bakery = Mock(BakeryService)
 
     when:
@@ -591,7 +586,7 @@ class CreateBakeTaskSpec extends Specification {
 
   def "cloudProviderType is propagated"() {
     given:
-    Stage stage = new PipelineStage(new Pipeline(), "bake", bakeConfigWithCloudProviderType)
+    Stage stage = new Stage<>(new Pipeline(), "bake", bakeConfigWithCloudProviderType)
     def bake
     task.bakery = Mock(BakeryService) {
       1 * createBake(*_) >> {
@@ -633,7 +628,7 @@ class CreateBakeTaskSpec extends Specification {
 
   def "sets rebake query parameter if rebake flag is set in job context"() {
     given:
-    Stage stage = new PipelineStage(new Pipeline(), "bake", bakeConfigWithRebake)
+    Stage stage = new Stage<>(new Pipeline(), "bake", bakeConfigWithRebake)
     task.bakery = Mock(BakeryService)
 
     when:
@@ -655,7 +650,7 @@ class CreateBakeTaskSpec extends Specification {
   def "sets rebake query parameter to #queryParameter when trigger is #trigger"() {
     given:
     Pipeline pipeline = Pipeline.builder().withTrigger(trigger).build()
-    Stage pipelineStage = new PipelineStage(pipeline, "bake", bakeConfig)
+    Stage pipelineStage = new Stage<>(pipeline, "bake", bakeConfig)
     task.bakery = Mock(BakeryService)
 
     when:
@@ -673,7 +668,7 @@ class CreateBakeTaskSpec extends Specification {
     0 * _
 
     when:
-    task.execute(new OrchestrationStage(new Orchestration(), "bake", bakeConfig))
+    task.execute(new Stage<>(new Orchestration(), "bake", bakeConfig))
 
     then:
     1 * task.bakery.createBake(bakeConfig.region,

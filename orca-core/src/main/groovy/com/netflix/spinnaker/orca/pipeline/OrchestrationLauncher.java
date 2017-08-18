@@ -16,33 +16,35 @@
 
 package com.netflix.spinnaker.orca.pipeline;
 
-import java.io.IOException;
-import java.io.Serializable;
-import java.time.Clock;
-import java.util.Map;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.netflix.spinnaker.orca.pipeline.model.Execution.AuthenticationDetails;
 import com.netflix.spinnaker.orca.pipeline.model.Orchestration;
-import com.netflix.spinnaker.orca.pipeline.model.OrchestrationStage;
 import com.netflix.spinnaker.orca.pipeline.model.Stage;
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+
+import java.io.IOException;
+import java.io.Serializable;
+import java.time.Clock;
+import java.util.Map;
+
+import static com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionEngine.v3;
 import static java.lang.String.format;
 
 @Component
 public class OrchestrationLauncher extends ExecutionLauncher<Orchestration> {
 
-  private Clock clock;
+  private final Clock clock;
 
   @Autowired
   public OrchestrationLauncher(
     ObjectMapper objectMapper,
-    String currentInstanceId,
     ExecutionRepository executionRepository,
-    ExecutionRunner runner,
-    Clock clock) {
-    super(objectMapper, currentInstanceId, executionRepository, runner);
+    ExecutionRunner executionRunner,
+    Clock clock
+  ) {
+    super(objectMapper, executionRepository, executionRunner);
     this.clock = clock;
   }
 
@@ -60,9 +62,7 @@ public class OrchestrationLauncher extends ExecutionLauncher<Orchestration> {
     if (config.containsKey("description")) {
       orchestration.setDescription(getString(config, "description"));
     }
-    if (config.containsKey("appConfig")) {
-      orchestration.getAppConfig().putAll(getMap(config, "appConfig"));
-    }
+    orchestration.setExecutionEngine(v3);
 
     for (Map<String, Object> context : getList(config, "stages")) {
       String type = context.remove("type").toString();
@@ -73,13 +73,13 @@ public class OrchestrationLauncher extends ExecutionLauncher<Orchestration> {
       }
 
       // TODO: need to check it's valid?
-      Stage<Orchestration> stage = new OrchestrationStage(orchestration, type, context);
+      Stage<Orchestration> stage = new Stage<>(orchestration, type, context);
       orchestration.getStages().add(stage);
     }
 
     orchestration.setBuildTime(clock.millis());
     orchestration.setAuthentication(AuthenticationDetails.build().orElse(new AuthenticationDetails()));
-    orchestration.setExecutingInstance(currentInstanceId);
+    orchestration.setOrigin((String) config.getOrDefault("origin", "unknown"));
 
     return orchestration;
   }

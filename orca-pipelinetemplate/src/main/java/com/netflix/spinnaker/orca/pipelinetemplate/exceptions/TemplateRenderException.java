@@ -15,7 +15,43 @@
  */
 package com.netflix.spinnaker.orca.pipelinetemplate.exceptions;
 
+import com.netflix.spinnaker.orca.pipelinetemplate.validator.Errors;
+import com.netflix.spinnaker.orca.pipelinetemplate.validator.Errors.Error;
+
 public class TemplateRenderException extends RuntimeException {
+
+  public static TemplateRenderException fromError(Error error) {
+    return new TemplateRenderException(error.getMessage(), null, error);
+  }
+
+  public static TemplateRenderException fromError(Error error, Throwable cause) {
+    TemplateRenderException e = new TemplateRenderException(error.getMessage(), cause, error);
+
+    if (cause instanceof TemplateRenderException) {
+      error.withNested(((TemplateRenderException) cause).getErrors());
+    } else if (error.getCause() == null) {
+      error.withCause(cause.getMessage());
+    }
+
+    return e;
+  }
+
+  private Errors errors = new Errors();
+
+  public TemplateRenderException(String message, Throwable cause, Errors errors) {
+    this(message, cause);
+    this.errors = errors;
+  }
+
+  private TemplateRenderException(String message, Throwable cause, Error error) {
+    this(message, cause);
+    this.errors.add(error);
+  }
+
+  public TemplateRenderException(Error error) {
+    this(error.getMessage());
+    this.errors.add(error);
+  }
 
   public TemplateRenderException(String message) {
     super(message);
@@ -25,7 +61,7 @@ public class TemplateRenderException extends RuntimeException {
     super(message, cause);
   }
 
-  public TemplateRenderException(Throwable cause) {
-    super(cause);
+  public Errors getErrors() {
+    return errors;
   }
 }

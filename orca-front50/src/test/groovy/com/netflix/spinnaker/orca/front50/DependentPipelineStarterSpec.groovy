@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.netflix.spinnaker.orca.pipeline.PipelineLauncher
 import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Pipeline
+import com.netflix.spinnaker.orca.pipeline.util.ContextParameterProcessor
 import com.netflix.spinnaker.security.AuthenticatedRequest
 import org.slf4j.MDC
 import org.springframework.context.support.StaticApplicationContext
@@ -48,7 +49,7 @@ class DependentPipelineStarterSpec extends Specification {
       start(*_) >> {
         gotMDC.putAll(MDC.copyOfContextMap)
         def p = mapper.readValue(it[0], Map)
-        return new Pipeline.Builder().withName(p.name).withId(p.name).withTrigger(p.trigger).build()
+        return Pipeline.builder().withName(p.name).withId(p.name).withTrigger(p.trigger).build()
       }
     }
     def applicationContext = new StaticApplicationContext()
@@ -59,7 +60,8 @@ class DependentPipelineStarterSpec extends Specification {
     ]
     dependentPipelineStarter = new DependentPipelineStarter(
       objectMapper: mapper,
-      applicationContext: applicationContext
+      applicationContext: applicationContext,
+      contextParameterProcessor: new ContextParameterProcessor()
     )
 
     when:
@@ -93,14 +95,15 @@ class DependentPipelineStarterSpec extends Specification {
       start(*_) >> {
         gotMDC.putAll(MDC.copyOfContextMap)
         def p = mapper.readValue(it[0], Map)
-        return new Pipeline.Builder().withName(p.name).withId(p.name).withTrigger(p.trigger).build()
+        return Pipeline.builder().withName(p.name).withId(p.name).withTrigger(p.trigger).build()
       }
     }
     def applicationContext = new StaticApplicationContext()
     applicationContext.beanFactory.registerSingleton("pipelineLauncher", executionLauncher)
     dependentPipelineStarter = new DependentPipelineStarter(
       objectMapper: mapper,
-      applicationContext: applicationContext
+      applicationContext: applicationContext,
+      contextParameterProcessor: new ContextParameterProcessor()
     )
 
     when:

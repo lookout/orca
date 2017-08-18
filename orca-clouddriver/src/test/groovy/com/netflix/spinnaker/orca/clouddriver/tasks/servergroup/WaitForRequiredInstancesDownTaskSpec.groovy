@@ -16,14 +16,14 @@
 
 package com.netflix.spinnaker.orca.clouddriver.tasks.servergroup
 
-import com.netflix.spinnaker.orca.DefaultTaskResult
 import com.netflix.spinnaker.orca.ExecutionStatus
+import com.netflix.spinnaker.orca.TaskResult
 import com.netflix.spinnaker.orca.clouddriver.OortService
 import com.netflix.spinnaker.orca.clouddriver.pipeline.servergroup.support.TargetServerGroup
 import com.netflix.spinnaker.orca.clouddriver.utils.OortHelper
 import com.netflix.spinnaker.orca.jackson.OrcaObjectMapper
 import com.netflix.spinnaker.orca.pipeline.model.Pipeline
-import com.netflix.spinnaker.orca.pipeline.model.PipelineStage
+import com.netflix.spinnaker.orca.pipeline.model.Stage
 import retrofit.client.Response
 import retrofit.mime.TypedString
 import spock.lang.Specification
@@ -34,7 +34,7 @@ class WaitForRequiredInstancesDownTaskSpec extends Specification {
 
   @Subject task = new WaitForRequiredInstancesDownTask()
 
-  def mapper = new OrcaObjectMapper()
+  def mapper = OrcaObjectMapper.newInstance()
 
   void "should check cluster to get server groups"() {
     given:
@@ -62,7 +62,7 @@ class WaitForRequiredInstancesDownTaskSpec extends Specification {
       getCluster(*_) >> new Response('oort', 200, 'ok', [], new TypedString(response))
     }
     task.serverGroupCacheForceRefreshTask = Mock(ServerGroupCacheForceRefreshTask) {
-      2 * execute(_) >> new DefaultTaskResult(ExecutionStatus.SUCCEEDED)
+      2 * execute(_) >> new TaskResult(ExecutionStatus.SUCCEEDED)
       0 * _
     }
     task.oortHelper = Mock(OortHelper) {
@@ -72,7 +72,7 @@ class WaitForRequiredInstancesDownTaskSpec extends Specification {
     }
 
     and:
-    def stage = new PipelineStage(pipeline, 'asgActionWaitForDownInstances', [
+    def stage = new Stage<>(pipeline, 'asgActionWaitForDownInstances', [
       'targetop.asg.disableAsg.name'   : 'front50-v000',
       'targetop.asg.disableAsg.regions': ['us-east-1'],
       'account.name'                   : 'test'
@@ -92,7 +92,7 @@ class WaitForRequiredInstancesDownTaskSpec extends Specification {
   @Unroll
   void "should succeed as #hasSucceeded based on instance providers #healthProviderNames for instances #instances"() {
     given:
-    def stage = new PipelineStage(new Pipeline(), "", [desiredPercentage: desiredPercentage])
+    def stage = new Stage<>(new Pipeline(), "", [desiredPercentage: desiredPercentage])
 
     expect:
     hasSucceeded == task.hasSucceeded(stage, [capacity: [min: min, max: max, desired: desired], minSize: 0], instances, healthProviderNames)

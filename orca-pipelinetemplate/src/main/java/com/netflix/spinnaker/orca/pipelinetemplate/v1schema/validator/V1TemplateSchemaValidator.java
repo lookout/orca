@@ -16,25 +16,34 @@
 package com.netflix.spinnaker.orca.pipelinetemplate.v1schema.validator;
 
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.PipelineTemplate;
+import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.validator.V1TemplateSchemaValidator.SchemaValidatorContext;
 import com.netflix.spinnaker.orca.pipelinetemplate.validator.Errors;
 import com.netflix.spinnaker.orca.pipelinetemplate.validator.Errors.Error;
 import com.netflix.spinnaker.orca.pipelinetemplate.validator.SchemaValidator;
+import com.netflix.spinnaker.orca.pipelinetemplate.validator.ValidatorContext;
 import com.netflix.spinnaker.orca.pipelinetemplate.validator.VersionedSchema;
 
-public class V1TemplateSchemaValidator implements SchemaValidator {
+public class V1TemplateSchemaValidator<T extends SchemaValidatorContext> implements SchemaValidator<T> {
 
   private static final String SUPPORTED_VERSION = "1";
 
   @Override
-  public void validate(VersionedSchema pipelineTemplate, Errors errors) {
+  public void validate(VersionedSchema pipelineTemplate, Errors errors, SchemaValidatorContext context) {
     if (!(pipelineTemplate instanceof PipelineTemplate)) {
       throw new IllegalArgumentException("Expected PipelineTemplate");
     }
     PipelineTemplate template = (PipelineTemplate) pipelineTemplate;
 
     if (!SUPPORTED_VERSION.equals(template.getSchemaVersion())) {
-      errors.addError(Error.builder()
+      errors.add(new Error()
         .withMessage("template schema version is unsupported: expected '" + SUPPORTED_VERSION + "', got '" + template.getSchemaVersion() + "'"));
+    }
+
+    if (template.getProtect() && context.configHasStages) {
+      errors.add(new Error()
+        .withMessage("Modification of the stage graph (adding, removing, editing) is disallowed")
+        .withCause("The template being used has marked itself as protected")
+      );
     }
 
     V1SchemaValidationHelper.validateStageDefinitions(template.getStages(), errors, V1TemplateSchemaValidator::location);
@@ -44,5 +53,13 @@ public class V1TemplateSchemaValidator implements SchemaValidator {
 
   private static String location(String location) {
     return "template:" + location;
+  }
+
+  public static class SchemaValidatorContext implements ValidatorContext {
+    boolean configHasStages = false;
+
+    public SchemaValidatorContext(boolean configHasStages) {
+      this.configHasStages = configHasStages;
+    }
   }
 }
