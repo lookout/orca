@@ -7,7 +7,7 @@ default:
 
 front50:
   enabled: true
-  baseUrl: http://front50-8461235.us-west-2.elb.amazonaws.com:8080
+  baseUrl: http://54.186.115.137:8080
 tide:
   baseUrl: http://localhost:8090
 oort:
@@ -30,7 +30,7 @@ bakery:
   allowMissingPackageInstallation: false
 
 redis:
-  connection: ${REDIS_URL:redis://redis-spinnaker.rnc0rv.0001.usw2.cache.amazonaws.com:6379}
+  connection: redis://34.213.184.15:6379
 
 tasks:
   useWaitForAllNetflixAWSInstancesDownTask: false
