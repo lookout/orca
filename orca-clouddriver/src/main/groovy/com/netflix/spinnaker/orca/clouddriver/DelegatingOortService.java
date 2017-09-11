@@ -47,6 +47,13 @@ public class DelegatingOortService
 
   @Override
   public Response getTargetServerGroup(String app, String account, String cluster, String cloudProvider, String scope, String target) {
+    if (app == null) {
+      app = "arrow";  // TODO - figure out why "app" is null here
+    }
+
+    if (cluster == null) {
+      cluster = "arrow-v001";  // TODO - figure out why "cluster" is null here
+    }
     return getService().getTargetServerGroup(app, account, cluster, cloudProvider, scope, target);
   }
 

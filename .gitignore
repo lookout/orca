@@ -10,4 +10,9 @@ out/
 .DS_Store
 /json/
 *.rdb
+
+
+*.tar.gz
+
 /.shelf/
+

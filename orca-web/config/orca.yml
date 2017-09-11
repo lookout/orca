@@ -7,7 +7,7 @@ default:
 
 front50:
   enabled: true
-  baseUrl: http://localhost:8080
+  baseUrl: http://front50-8461235.us-west-2.elb.amazonaws.com:8080
 tide:
   baseUrl: http://localhost:8090
 oort:
@@ -19,10 +19,10 @@ kato:
 echo:
   enabled: false
 igor:
-  enabled: true
+  enabled: false
   baseUrl: http://localhost:8088
 bakery:
-  enabled: true
+  enabled: false
   baseUrl: http://localhost:8089
   # Rosco exposes more endpoints than Netflix's internal bakery. This disables
   # the use of those endpoints.
@@ -30,7 +30,7 @@ bakery:
   allowMissingPackageInstallation: false
 
 redis:
-  connection: ${REDIS_URL:redis://localhost:6379}
+  connection: ${REDIS_URL:redis://redis-spinnaker.rnc0rv.0001.usw2.cache.amazonaws.com:6379}
 
 tasks:
   useWaitForAllNetflixAWSInstancesDownTask: false
