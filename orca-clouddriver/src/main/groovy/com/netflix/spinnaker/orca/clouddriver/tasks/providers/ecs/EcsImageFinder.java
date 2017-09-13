@@ -53,25 +53,13 @@ public class EcsImageFinder implements ImageFinder {
       (String) stage.getContext().get("imageLabelOrSha"),
       null,
       null,
-      prefixTags(tags));
+      null);
+
     List<EcsImage> allMatchedImages = result
       .stream()
       .map(image -> objectMapper.convertValue(image, EcsImage.class))
-//      .filter(image -> image.tagsByImageId != null && image.tagsByImageId.size() != 0)
       .sorted()
       .collect(Collectors.toList());
-
-    List<ImageDetails> imageDetails = new ArrayList<>();
-
-    /*
-     * For each region, find the most recently created image.
-     * (optimized for readability over efficiency given the generally small # of images)
-     */
-    stageData.regions.forEach(region -> allMatchedImages.stream()
-//      .filter(image -> image.amis.containsKey(region))
-      .findFirst()
-      .map(image -> imageDetails.add(image.toAmazonImageDetails(region)))
-    );
 
     return Sets.newHashSet(allMatchedImages.get(0).toAmazonImageDetails("us-west-2"));
   }

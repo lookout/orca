@@ -43,11 +43,8 @@ class EcsServerGroupCreator implements ServerGroupCreator, DeploymentDetailsAwar
 
     def bakeStage = getPreviousStageWithImage(stage, operation.region, cloudProvider)
 
-    if (bakeStage) {  // TODO - does this logic regarding the bake stage make sense?
-      operation.image.isCustom = true
-      operation.image.uri = bakeStage.context?.imageId
-      operation.image.ostype = bakeStage.context?.osType
-      operation.image.imageName = bakeStage.context?.imageName
+    if (bakeStage) {
+      operation.put('dockerImageAddress', bakeStage.context.amiDetails.imageName.value)
     }
 
     return [[(ServerGroupCreator.OPERATION): operation]]
