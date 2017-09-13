@@ -44,7 +44,7 @@ class EcsServerGroupCreator implements ServerGroupCreator, DeploymentDetailsAwar
     def bakeStage = getPreviousStageWithImage(stage, operation.region, cloudProvider)
 
     if (bakeStage) {
-      operation.put('dockerImageAddress', bakeStage.context.amiDetails.imageName.value)
+      operation.put('dockerImageAddress', bakeStage.context.amiDetails.imageId.value.get(0).toString())
     }
 
     return [[(ServerGroupCreator.OPERATION): operation]]

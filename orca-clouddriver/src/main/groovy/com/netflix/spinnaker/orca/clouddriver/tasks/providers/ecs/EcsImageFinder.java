@@ -19,21 +19,18 @@ package com.netflix.spinnaker.orca.clouddriver.tasks.providers.ecs;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Sets;
-import com.netflix.frigga.ami.AppVersion;
 import com.netflix.spinnaker.orca.clouddriver.OortService;
 import com.netflix.spinnaker.orca.clouddriver.tasks.image.ImageFinder;
 import com.netflix.spinnaker.orca.pipeline.model.Stage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static java.util.stream.Collectors.toMap;
 
@@ -61,7 +58,8 @@ public class EcsImageFinder implements ImageFinder {
       .sorted()
       .collect(Collectors.toList());
 
-    return Sets.newHashSet(allMatchedImages.get(0).toAmazonImageDetails("us-west-2"));
+    HashSet<ImageDetails> response = Sets.newHashSet(allMatchedImages.get(0).toImageDetails("us-west-2"));
+    return response;
   }
 
   @Override
@@ -93,7 +91,7 @@ public class EcsImageFinder implements ImageFinder {
     @JsonProperty
     Map<String, List<String>> amis;
 
-    ImageDetails toAmazonImageDetails(String region) {
+    ImageDetails toImageDetails(String region) {
       String imageId = amis.get(region).get(0);
 
 //      Map<String, String> imageTags = tagsByImageId.get(imageId);
@@ -105,7 +103,7 @@ public class EcsImageFinder implements ImageFinder {
 //        .orElse(null);
 
       return new EcsImageDetails(
-        imageName, imageId, region, new JenkinsDetails("host", "name", "1337001")
+        imageId, imageName, region, new JenkinsDetails("host", "name", "1337001")
       );
     }
 
