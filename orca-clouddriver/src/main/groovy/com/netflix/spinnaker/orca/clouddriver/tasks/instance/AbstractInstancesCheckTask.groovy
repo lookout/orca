@@ -91,6 +91,7 @@ abstract class AbstractInstancesCheckTask extends AbstractCloudProviderAwareTask
     Map<String, List<String>> serverGroupsByRegion = getServerGroups(stage)
 
     if (!serverGroupsByRegion || !serverGroupsByRegion?.values()?.flatten()) {
+      log.error "no server groups grouped by region were found , failing task execution"
       return new TaskResult(ExecutionStatus.TERMINAL)
     }
 
