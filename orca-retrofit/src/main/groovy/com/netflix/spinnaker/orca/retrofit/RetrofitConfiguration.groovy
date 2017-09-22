@@ -37,6 +37,8 @@ import retrofit.RestAdapter.LogLevel
 import retrofit.client.Client
 import retrofit.client.OkClient
 
+import java.util.concurrent.TimeUnit
+
 @Configuration
 @CompileStatic
 @Import(OkHttpClientConfiguration)
@@ -66,6 +68,8 @@ class RetrofitConfiguration {
      })
      cfg.setConnectionPool(new ConnectionPool(maxIdleConnections, keepAliveDurationMs))
      cfg.retryOnConnectionFailure = retryOnConnectionFailure
+     cfg.setConnectTimeout(45L, TimeUnit.SECONDS)  // TODO - Remove this line, as this is a workaround for our slow Clouddriver
+     cfg.setReadTimeout(45L, TimeUnit.SECONDS)  // TODO - Remove this line, as this is a workaround for our slow Clouddriver
 
      new OkClient(cfg)
   }
