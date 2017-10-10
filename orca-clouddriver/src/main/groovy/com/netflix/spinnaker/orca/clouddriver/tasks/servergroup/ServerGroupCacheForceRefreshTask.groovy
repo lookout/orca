@@ -141,6 +141,10 @@ class ServerGroupCacheForceRefreshTask extends AbstractCloudProviderAwareTask im
                                                   String cloudProvider,
                                                   StageData stageData,
                                                   Long startTime) {
+    //TODO: Remove if statement when the proper acount is passed in.
+    if(account == "continuous-delivery" && cloudProvider == "ecs"){
+      account = account + "-ecs"
+    }
     def pendingForceCacheUpdates = cacheStatusService.pendingForceCacheUpdates(cloudProvider, REFRESH_TYPE)
 
     boolean finishedProcessing = true
