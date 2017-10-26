@@ -16,6 +16,8 @@
 
 package com.netflix.spinnaker.orca.controllers
 
+import com.netflix.spinnaker.orca.pipeline.util.ArtifactResolver
+
 import javax.servlet.http.HttpServletResponse
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.netflix.spinnaker.kork.web.exceptions.InvalidRequestException
@@ -36,6 +38,7 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestMethod
 import org.springframework.web.bind.annotation.RestController
+import static net.logstash.logback.argument.StructuredArguments.value
 
 @RestController
 @Slf4j
@@ -80,7 +83,7 @@ class OperationsController {
     pipeline.trigger = trigger
 
     def json = objectMapper.writeValueAsString(pipeline)
-    log.info('received pipeline {}:{}', pipeline.id, json)
+    log.info('received pipeline {}:{}', value("pipelineId", pipeline.id), json)
 
     if (pipeline.disabled) {
       throw new InvalidRequestException("Pipeline is disabled and cannot be started.")
@@ -92,7 +95,7 @@ class OperationsController {
     }
 
     if (plan) {
-      log.info('not starting pipeline (plan: true): {}', pipeline.id)
+      log.info('not starting pipeline (plan: true): {}', value("pipelineId", pipeline.id))
       if (pipeline.errors != null) {
         throw new ValidationException("Pipeline template is invalid", pipeline.errors as List<Map<String, Object>>)
       }
@@ -145,6 +148,8 @@ class OperationsController {
         pipeline.trigger.parameters[it.name] = pipeline.trigger.parameters.containsKey(it.name) ? pipeline.trigger.parameters[it.name] : it.default
       }
     }
+    
+    ArtifactResolver.resolveArtifacts(pipeline)
   }
 
   private void getBuildInfo(Map trigger) {

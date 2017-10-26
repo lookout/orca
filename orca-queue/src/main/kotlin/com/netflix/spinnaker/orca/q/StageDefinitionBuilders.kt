@@ -16,7 +16,6 @@
 
 package com.netflix.spinnaker.orca.q
 
-import com.netflix.spinnaker.orca.pipeline.BranchingStageDefinitionBuilder
 import com.netflix.spinnaker.orca.pipeline.RestrictExecutionDuringTimeWindow
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder.newStage
@@ -31,13 +30,7 @@ import com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner.STAGE_BEFOR
  * Build and append the tasks for [stage].
  */
 fun StageDefinitionBuilder.buildTasks(stage: Stage<*>) {
-  val taskGraph =
-    if (this is BranchingStageDefinitionBuilder && (stage.getParentStageId() == null || stage.parent().getType() != stage.getType())) {
-      buildPostGraph(stage)
-    } else {
-      buildTaskGraph(stage)
-    }
-  taskGraph
+  buildTaskGraph(stage)
     .listIterator()
     .forEachWithMetadata { processTaskNode(stage, it) }
 }
@@ -80,7 +73,7 @@ private fun processTaskNode(
 fun StageDefinitionBuilder.buildSyntheticStages(
   stage: Stage<out Execution<*>>,
   callback: (Stage<*>) -> Unit = {}
-): Unit {
+) {
   val executionWindow = stage.buildExecutionWindow()
   syntheticStages(stage).apply {
     buildBeforeStages(stage, executionWindow, callback)
@@ -90,10 +83,10 @@ fun StageDefinitionBuilder.buildSyntheticStages(
 }
 
 @Suppress("UNCHECKED_CAST")
-private fun BranchingStageDefinitionBuilder.parallelContexts(stage: Stage<*>) =
+private fun StageDefinitionBuilder.parallelStages(stage: Stage<*>) =
   when (stage.getExecution()) {
-    is Pipeline -> parallelContexts(stage as Stage<Pipeline>)
-    is Orchestration -> parallelContexts(stage as Stage<Orchestration>)
+    is Pipeline -> parallelStages(stage as Stage<Pipeline>)
+    is Orchestration -> parallelStages(stage as Stage<Orchestration>)
     else -> throw IllegalStateException()
   }
 
@@ -115,6 +108,7 @@ private fun SyntheticStages.buildBeforeStages(stage: Stage<out Execution<*>>, ex
     listOf(executionWindow) + this[STAGE_BEFORE].orEmpty()
   }
   beforeStages.forEachIndexed { i, it ->
+    it.sanitizeContext()
     it.setRefId("${stage.getRefId()}<${i + 1}")
     if (i > 0) {
       it.setRequisiteStageRefIds(setOf("${stage.getRefId()}<$i"))
@@ -131,6 +125,7 @@ private fun SyntheticStages.buildBeforeStages(stage: Stage<out Execution<*>>, ex
 private fun SyntheticStages.buildAfterStages(stage: Stage<out Execution<*>>, callback: (Stage<*>) -> Unit) {
   val afterStages = this[STAGE_AFTER].orEmpty()
   afterStages.forEachIndexed { i, it ->
+    it.sanitizeContext()
     it.setRefId("${stage.getRefId()}>${i + 1}")
     if (i > 0) {
       it.setRequisiteStageRefIds(setOf("${stage.getRefId()}>$i"))
@@ -148,30 +143,16 @@ private fun SyntheticStages.buildAfterStages(stage: Stage<out Execution<*>>, cal
 }
 
 private fun StageDefinitionBuilder.buildParallelStages(stage: Stage<out Execution<*>>, executionWindow: Stage<out Execution<*>>?, callback: (Stage<*>) -> Unit) {
-  if (this is BranchingStageDefinitionBuilder && (stage.getParentStageId() == null || stage.parent().getType() != stage.getType())) {
-    val parallelContexts = parallelContexts(stage)
-    parallelContexts
-      .map { context ->
-        val execution = stage.getExecution()
-        val stageType = context.getOrDefault("type", stage.getType()).toString()
-        val stageName = context.getOrDefault("name", stage.getName()).toString()
-        @Suppress("UNCHECKED_CAST")
-        when (execution) {
-          is Pipeline -> newStage(execution, stageType, stageName, context.filterKeys { it != "restrictExecutionDuringTimeWindow" }, stage as Stage<Pipeline>, STAGE_BEFORE)
-          is Orchestration -> newStage(execution, stageType, stageName, context.filterKeys { it != "restrictExecutionDuringTimeWindow" }, stage as Stage<Orchestration>, STAGE_BEFORE)
-          else -> throw IllegalStateException()
-        }
+  parallelStages(stage)
+    .forEachIndexed { i, it ->
+      it.sanitizeContext()
+      it.setRefId("${stage.getRefId()}=${i + 1}")
+      it.setRequisiteStageRefIds(if (executionWindow == null) emptySet() else setOf(executionWindow.getRefId()))
+      stage.getExecution().apply {
+        injectStage(getStages().indexOf(stage), it)
+        callback.invoke(it)
       }
-      .forEachIndexed { i, it ->
-        it.setRefId("${stage.getRefId()}=${i + 1}")
-        it.setRequisiteStageRefIds(if (executionWindow == null) emptySet() else setOf(executionWindow.getRefId()))
-        stage.getExecution().apply {
-          injectStage(getStages().indexOf(stage), it)
-          callback.invoke(it)
-        }
-      }
-    stage.setName(parallelStageName(stage, parallelContexts.size > 1))
-  }
+    }
 }
 
 private fun Stage<out Execution<*>>.buildExecutionWindow(): Stage<*>? {
@@ -204,9 +185,18 @@ private fun Stage<out Execution<*>>.buildExecutionWindow(): Stage<*>? {
 }
 
 @Suppress("UNCHECKED_CAST")
-private fun Execution<*>.injectStage(index: Int, it: Stage<*>) {
+private fun Execution<*>.injectStage(index: Int, stage: Stage<*>) {
   when (this) {
-    is Pipeline -> stages.add(index, it as Stage<Pipeline>)
-    is Orchestration -> stages.add(index, it as Stage<Orchestration>)
+    is Pipeline -> stages.add(index, stage as Stage<Pipeline>)
+    is Orchestration -> stages.add(index, stage as Stage<Orchestration>)
+  }
+}
+
+private fun Stage<*>.sanitizeContext() {
+  if (getType() != RestrictExecutionDuringTimeWindow.TYPE) {
+    getContext().apply {
+      remove("restrictExecutionDuringTimeWindow")
+      remove("restrictedExecutionWindow")
+    }
   }
 }

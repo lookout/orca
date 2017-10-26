@@ -1,32 +1,51 @@
+/*
+ * Copyright 2017 Netflix, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.netflix.spinnaker.orca.echo.spring
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.netflix.spinnaker.orca.front50.Front50Service
-
-import com.netflix.spinnaker.orca.front50.model.ApplicationNotifications
-import com.netflix.spinnaker.orca.pipeline.util.ContextParameterProcessor
-import groovy.transform.CompileStatic
-import groovy.util.logging.Slf4j
 import com.netflix.spinnaker.orca.ExecutionStatus
 import com.netflix.spinnaker.orca.echo.EchoService
+import com.netflix.spinnaker.orca.front50.Front50Service
+import com.netflix.spinnaker.orca.front50.model.ApplicationNotifications
 import com.netflix.spinnaker.orca.listeners.ExecutionListener
 import com.netflix.spinnaker.orca.listeners.Persister
 import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Pipeline
+import com.netflix.spinnaker.orca.pipeline.util.ContextParameterProcessor
+import groovy.transform.CompileDynamic
+import groovy.transform.CompileStatic
+import groovy.util.logging.Slf4j
 
 @Slf4j
 @CompileStatic
 class EchoNotifyingExecutionListener implements ExecutionListener {
 
   private final EchoService echoService
-
   private final Front50Service front50Service
-
   private final ObjectMapper objectMapper
-
   private final ContextParameterProcessor contextParameterProcessor
+  private final Set<String> dryRunPipelineIds
 
-  EchoNotifyingExecutionListener(EchoService echoService, Front50Service front50Service, ObjectMapper objectMapper, ContextParameterProcessor contextParameterProcessor) {
+  EchoNotifyingExecutionListener(
+    EchoService echoService,
+    Front50Service front50Service,
+    ObjectMapper objectMapper,
+    ContextParameterProcessor contextParameterProcessor,
+    Set<String> dryRunPipelineIds) {
+    this.dryRunPipelineIds = dryRunPipelineIds
     this.echoService = echoService
     this.front50Service = front50Service
     this.objectMapper = objectMapper
@@ -43,7 +62,7 @@ class EchoNotifyingExecutionListener implements ExecutionListener {
         echoService.recordEvent(
           details: [
             source     : "orca",
-            type       : "orca:${execution.getClass().simpleName.toLowerCase()}:starting",
+            type       : "orca:${execution.getClass().simpleName.toLowerCase()}:starting".toString(),
             application: execution.application,
           ],
           content: [
@@ -66,6 +85,7 @@ class EchoNotifyingExecutionListener implements ExecutionListener {
       if (execution.status != ExecutionStatus.SUSPENDED) {
         if (execution instanceof Pipeline) {
           addApplicationNotifications(execution as Pipeline)
+          addDryRunNotifications(execution as Pipeline)
         }
         echoService.recordEvent(
           details: [
@@ -117,4 +137,17 @@ class EchoNotifyingExecutionListener implements ExecutionListener {
       }
     }
   }
+
+  /**
+   * Adds a notification for dry run enabled pipelines.
+   * @param pipeline
+   */
+  @CompileDynamic
+  private void addDryRunNotifications(Pipeline pipeline) {
+    if (pipeline.pipelineConfigId in dryRunPipelineIds) {
+      log.info("Sending dry run notification for $pipeline.application $pipeline.name")
+      pipeline.notifications << [type: "dryrun", when: "pipeline.complete"]
+    }
+  }
+
 }

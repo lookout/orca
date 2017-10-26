@@ -17,6 +17,7 @@
 package com.netflix.spinnaker.orca.kato.pipeline.support
 
 import com.netflix.frigga.autoscaling.AutoScalingGroupNameBuilder
+import com.netflix.spinnaker.moniker.Moniker
 
 class StageData {
   String strategy
@@ -27,6 +28,7 @@ class StageData {
   String freeFormDetails
   String application
   String stack
+  Moniker moniker
   @Deprecated String providerType = "aws"
   String cloudProvider = "aws"
   boolean scaleDown
@@ -35,14 +37,23 @@ class StageData {
   Boolean useSourceCapacity
   Boolean preferSourceCapacity
   Source source
+
+  @Deprecated
   long delayBeforeDisableSec
 
+  long delayBeforeCleanup
+  PipelineBeforeCleanup pipelineBeforeCleanup
+
   String getCluster() {
-    def builder = new AutoScalingGroupNameBuilder()
-    builder.appName = application
-    builder.stack = stack
-    builder.detail = freeFormDetails
-    return builder.buildGroupName()
+    if (moniker?.cluster) {
+      return moniker.cluster
+    } else {
+      def builder = new AutoScalingGroupNameBuilder()
+      builder.appName = application
+      builder.stack = stack
+      builder.detail = freeFormDetails
+      return builder.buildGroupName()
+    }
   }
 
   String getAccount() {
@@ -50,6 +61,10 @@ class StageData {
       throw new IllegalStateException("Cannot specify different values for 'account' and 'credentials' (${application})")
     }
     return account ?: credentials
+  }
+
+  long getDelayBeforeCleanup() {
+    return this.delayBeforeCleanup ?: this.delayBeforeDisableSec
   }
 
   @Deprecated
@@ -86,4 +101,8 @@ class StageData {
     Boolean preferSourceCapacity
   }
 
+  static class PipelineBeforeCleanup {
+    String application
+    String pipelineId
+  }
 }

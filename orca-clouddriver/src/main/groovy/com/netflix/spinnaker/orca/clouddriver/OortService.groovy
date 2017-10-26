@@ -30,6 +30,9 @@ interface OortService {
                       @Path("cluster") String cluster,
                       @Path("cloudProvider") String cloudProvider)
 
+  @GET("/applications/{app}/serverGroups")
+  Response getServerGroups(@Path("app") String app)
+
   @GET("/applications/{app}/clusters/{account}/{cluster}/{cloudProvider}/serverGroups/{serverGroup}")
   Response getServerGroupFromCluster(@Path("app") String app,
                                      @Path("account") String account,
@@ -38,11 +41,17 @@ interface OortService {
                                      @Query("region") String region,
                                      @Path("cloudProvider") String cloudProvider)
 
+  @Deprecated
   @GET("/applications/{app}/serverGroups/{account}/{region}/{serverGroup}")
   Response getServerGroup(@Path("app") String app,
-                     @Path("account") String account,
-                     @Path("region") String region,
-                     @Path("serverGroup") String serverGroup)
+                          @Path("account") String account,
+                          @Path("region") String region,
+                          @Path("serverGroup") String serverGroup)
+
+  @GET("/serverGroups/{account}/{region}/{serverGroup}")
+  Response getServerGroup(@Path("account") String account,
+                          @Path("region") String region,
+                          @Path("serverGroup") String serverGroup)
 
   @GET("/applications/{app}/clusters/{account}/{cluster}/{cloudProvider}/{scope}/serverGroups/target/{target}")
   Response getTargetServerGroup(@Path("app") String app,

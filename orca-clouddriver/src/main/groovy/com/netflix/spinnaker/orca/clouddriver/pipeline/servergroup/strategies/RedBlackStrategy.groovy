@@ -59,6 +59,7 @@ class RedBlackStrategy implements Strategy, ApplicationContextAware {
       (cleanupConfig.location.singularType()): cleanupConfig.location.value,
       cluster                                : cleanupConfig.cluster,
       credentials                            : cleanupConfig.account,
+      moniker                                : cleanupConfig.moniker,
       cloudProvider                          : cleanupConfig.cloudProvider,
     ]
 
@@ -84,8 +85,8 @@ class RedBlackStrategy implements Strategy, ApplicationContextAware {
       )
     }
 
-    if(stageData?.delayBeforeDisableSec) {
-      def waitContext = [waitTime: stageData?.delayBeforeDisableSec]
+    if(stageData?.getDelayBeforeCleanup()) {
+      def waitContext = [waitTime: stageData?.getDelayBeforeCleanup()]
       stages << newStage(
         stage.execution,
         waitStage.type,

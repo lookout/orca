@@ -22,6 +22,8 @@ import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.PipelineTempla
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.TemplateConfiguration;
 import org.apache.commons.lang3.StringUtils;
 
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -36,18 +38,21 @@ public class DefaultVariableAssignmentTransform implements PipelineTemplateVisit
 
   @Override
   public void visitPipelineTemplate(PipelineTemplate pipelineTemplate) {
-    if (pipelineTemplate.getVariables() == null || pipelineTemplate.getVariables().isEmpty()) {
+    List<Variable> pipelineTemplateVariables = pipelineTemplate.getVariables();
+    if (pipelineTemplateVariables == null || pipelineTemplateVariables.isEmpty()) {
       return;
     }
 
-    Map<String, Object> configVars = templateConfiguration.getPipeline().getVariables();
+    Map<String, Object> configVars = templateConfiguration.getPipeline().getVariables() != null
+      ? templateConfiguration.getPipeline().getVariables()
+      : new HashMap<>();
 
     // if the config is missing vars and the template defines a default value, assign those values from the config
-    pipelineTemplate.getVariables().stream()
+    pipelineTemplateVariables.stream()
       .filter(templateVar -> !configVars.containsKey(templateVar.getName()) && templateVar.hasDefaultValue())
       .forEach(templateVar -> configVars.put(templateVar.getName(), templateVar.getDefaultValue()));
 
-    List<String> missingVariables = pipelineTemplate.getVariables().stream()
+    List<String> missingVariables = pipelineTemplateVariables.stream()
       .filter(templateVar -> !configVars.containsKey(templateVar.getName()))
       .map(Variable::getName)
       .collect(Collectors.toList());
@@ -56,6 +61,31 @@ public class DefaultVariableAssignmentTransform implements PipelineTemplateVisit
       throw new IllegalTemplateConfigurationException("Missing variable values for: " + StringUtils.join(missingVariables, ", "));
     }
 
-    // TODO rz - validate variable values match the defined variable type
+    // collect variables where value type doesn't match the required type
+    List<String> wrongTypeErrorMessages = pipelineTemplateVariables.stream()
+      .filter(templateVar -> {
+        String expectedType = templateVar.getType();
+        if (expectedType.equalsIgnoreCase("object")) {
+          return false; // not invalid, all classes are objects
+        }
+
+        Class<?> actualType = configVars.get(templateVar.getName()).getClass();
+        Object actualVar = configVars.get(templateVar.getName());
+
+        return !(
+          (expectedType.equalsIgnoreCase("int") && (actualVar instanceof Integer)) ||
+          (expectedType.equalsIgnoreCase("bool") && actualVar instanceof Boolean) ||
+          (expectedType.equalsIgnoreCase("list") && actualVar instanceof Collection) ||
+          (expectedType.equalsIgnoreCase("string") && actualVar instanceof CharSequence) ||
+          (expectedType.equalsIgnoreCase("float") && actualVar instanceof Float) ||
+          (expectedType.equalsIgnoreCase(actualType.getSimpleName()))
+        );
+      })
+       .map(var -> var.getName() + " (expected type '" + var.getType() + "' found type '" + configVars.get(var.getName()).getClass().getSimpleName() + "')")
+      .collect(Collectors.toList());
+
+    if (!wrongTypeErrorMessages.isEmpty()) {
+      throw new IllegalTemplateConfigurationException("Incorrectly defined variable(s): " + StringUtils.join(wrongTypeErrorMessages, ", "));
+    }
   }
 }

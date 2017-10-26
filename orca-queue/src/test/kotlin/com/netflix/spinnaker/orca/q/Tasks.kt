@@ -16,8 +16,10 @@
 
 package com.netflix.spinnaker.orca.q
 
+import com.netflix.spinnaker.orca.OverridableTimeoutRetryableTask
 import com.netflix.spinnaker.orca.RetryableTask
 import com.netflix.spinnaker.orca.Task
 
 interface DummyTask : RetryableTask
 interface InvalidTask : Task
+interface DummyTimeoutOverrideTask : OverridableTimeoutRetryableTask

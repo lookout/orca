@@ -46,13 +46,24 @@ public class TrafficGuard {
     this.front50Service = front50Service.orElse(null);
   }
 
-  public void verifyInstanceTermination(List<String> instanceIds, String account, Location location, String cloudProvider, String operationDescriptor) {
+  public void verifyInstanceTermination(String serverGroupNameFromStage,
+                                        List<String> instanceIds,
+                                        String account,
+                                        Location location,
+                                        String cloudProvider,
+                                        String operationDescriptor) {
     Map<String, List<String>> instancesPerServerGroup = new HashMap<>();
-    instanceIds.forEach(instanceId -> {
+    for (String instanceId : instanceIds) {
+      String serverGroupName = serverGroupNameFromStage;
+      if (serverGroupName == null) {
+        Optional<String> resolvedServerGroupName = resolveServerGroupNameForInstance(instanceId, account, location.getValue(), cloudProvider);
+        serverGroupName = resolvedServerGroupName.orElse(null);
+      }
 
-      Optional<String> resolvedServerGroupName = resolveServerGroupNameForInstance(instanceId, account, location.getValue(), cloudProvider);
-      resolvedServerGroupName.ifPresent(name -> instancesPerServerGroup.computeIfAbsent(name, serverGroup -> new ArrayList<>()).add(instanceId));
-    });
+      if (serverGroupName != null) {
+        instancesPerServerGroup.computeIfAbsent(serverGroupName, serverGroup -> new ArrayList<>()).add(instanceId);
+      }
+    }
 
     instancesPerServerGroup.entrySet().forEach(entry -> {
       String serverGroupName = entry.getKey();
@@ -133,11 +144,9 @@ public class TrafficGuard {
       return false;
     }
     List<Map<String, String>> trafficGuards = (List<Map<String, String>>) application.details().get("trafficGuards");
-    return trafficGuards.stream().anyMatch(guard ->
-      ("*".equals(guard.get("account")) || account.equals(guard.get("account"))) &&
-        ("*".equals(guard.get("location")) || location.getValue().equals(guard.get("location"))) &&
-          ("*".equals(guard.get("stack")) || StringUtils.equals(names.getStack(), guard.get("stack"))) &&
-            ("*".equals(guard.get("detail")) || StringUtils.equals(names.getDetail(), guard.get("detail")))
-    );
+    List<ClusterMatchRule> rules = trafficGuards.stream().map(guard ->
+      new ClusterMatchRule(guard.get("account"), guard.get("location"), guard.get("stack"), guard.get("detail"), 1)
+    ).collect(Collectors.toList());
+    return ClusterMatcher.getMatchingRule(account, location.getValue(), cluster, rules) != null;
   }
 }

@@ -16,6 +16,7 @@
 
 package com.netflix.spinnaker.orca.bakery.pipeline
 
+import javax.annotation.Nonnull
 import com.netflix.spinnaker.orca.ExecutionStatus
 import com.netflix.spinnaker.orca.RestartableStage
 import com.netflix.spinnaker.orca.Task
@@ -23,7 +24,7 @@ import com.netflix.spinnaker.orca.TaskResult
 import com.netflix.spinnaker.orca.bakery.tasks.CompletedBakeTask
 import com.netflix.spinnaker.orca.bakery.tasks.CreateBakeTask
 import com.netflix.spinnaker.orca.bakery.tasks.MonitorBakeTask
-import com.netflix.spinnaker.orca.pipeline.BranchingStageDefinitionBuilder
+import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
 import com.netflix.spinnaker.orca.pipeline.TaskNode
 import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
@@ -32,30 +33,48 @@ import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
 import org.springframework.stereotype.Component
 
+import static com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner.STAGE_BEFORE
+
 @Slf4j
 @Component
 @CompileStatic
-class BakeStage implements BranchingStageDefinitionBuilder, RestartableStage {
+class BakeStage implements StageDefinitionBuilder, RestartableStage {
 
   public static final String PIPELINE_CONFIG_TYPE = "bake"
 
   @Override
   <T extends Execution<T>> void taskGraph(Stage<T> stage, TaskNode.Builder builder) {
-    builder
-      .withTask("createBake", CreateBakeTask)
-      .withTask("monitorBake", MonitorBakeTask)
-      .withTask("completedBake", CompletedBakeTask)
+    if (isTopLevelStage(stage)) {
+      builder
+        .withTask("completeParallel", CompleteParallelBakeTask)
+    } else {
+      builder
+        .withTask("createBake", CreateBakeTask)
+        .withTask("monitorBake", MonitorBakeTask)
+        .withTask("completedBake", CompletedBakeTask)
+    }
   }
 
   @Override
-  void postBranchGraph(Stage<?> stage, TaskNode.Builder builder) {
-    builder
-      .withTask("completeParallel", CompleteParallelBakeTask)
+  @Nonnull
+  <T extends Execution<T>> List<Stage<T>> parallelStages(
+    @Nonnull Stage<T> stage
+  ) {
+    if (isTopLevelStage(stage)) {
+      return parallelContexts(stage).collect { context ->
+        newStage(stage.execution, type, "Bake in ${context.region}", context, stage, STAGE_BEFORE)
+      }
+    } else {
+      return Collections.emptyList()
+    }
   }
 
-  @Override
+  private boolean isTopLevelStage(Stage<?> stage) {
+    stage.parentStageId == null
+  }
+
   @CompileDynamic
-  public <T extends Execution<T>> Collection<Map<String, Object>> parallelContexts(Stage<T> stage) {
+  <T extends Execution<T>> Collection<Map<String, Object>> parallelContexts(Stage<T> stage) {
     Set<String> deployRegions = stage.context.region ? [stage.context.region] as Set<String> : []
     deployRegions.addAll(stage.context.regions as Set<String> ?: [])
 
@@ -98,11 +117,6 @@ class BakeStage implements BranchingStageDefinitionBuilder, RestartableStage {
         name  : "Bake in ${it}" as String
       ] as Map<String, Object>)
     }
-  }
-
-  @Override
-  String parallelStageName(Stage<?> stage, boolean hasParallelFlows) {
-    return hasParallelFlows ? "Multi-region Bake" : stage.name
   }
 
   @Component

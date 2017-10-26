@@ -18,7 +18,7 @@ package com.netflix.spinnaker.orca.igor.tasks
 
 import java.util.concurrent.TimeUnit
 import com.netflix.spinnaker.orca.ExecutionStatus
-import com.netflix.spinnaker.orca.RetryableTask
+import com.netflix.spinnaker.orca.OverridableTimeoutRetryableTask
 import com.netflix.spinnaker.orca.TaskResult
 import com.netflix.spinnaker.orca.igor.BuildArtifactFilter
 import com.netflix.spinnaker.orca.igor.BuildService
@@ -30,7 +30,7 @@ import retrofit.RetrofitError
 
 @Slf4j
 @Component
-class MonitorJenkinsJobTask implements RetryableTask {
+class MonitorJenkinsJobTask implements OverridableTimeoutRetryableTask {
 
   long backoffPeriod = 10000
   long timeout = TimeUnit.HOURS.toMillis(2)
@@ -79,7 +79,7 @@ class MonitorJenkinsJobTask implements RetryableTask {
         if (stage.context.propertyFile) {
           properties = buildService.getPropertyFile(buildNumber, stage.context.propertyFile, master, job)
           if (properties.size() == 0 && result == 'SUCCESS') {
-            throw new IllegalStateException("expected properties file ${stage.context.propertyFile} but one was not found or was empty")
+            throw new IllegalStateException("Expected properties file ${stage.context.propertyFile} but it was either missing, empty or contained invalid syntax")
           }
           outputs << properties
           outputs.propertyFileContents = properties
