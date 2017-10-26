@@ -16,10 +16,15 @@
 
 package com.netflix.spinnaker.orca.mine.pipeline
 
+import com.netflix.spinnaker.orca.CancellableStage.Result
+import com.netflix.spinnaker.orca.RetrySupport
+import com.netflix.spinnaker.orca.clouddriver.tasks.servergroup.DestroyServerGroupTask
+import com.netflix.spinnaker.orca.clouddriver.utils.OortHelper
+import com.netflix.spinnaker.orca.clouddriver.KatoService
+
 import java.util.concurrent.TimeUnit
 import com.netflix.frigga.autoscaling.AutoScalingGroupNameBuilder
 import com.netflix.spinnaker.orca.CancellableStage
-import com.netflix.spinnaker.orca.clouddriver.tasks.cluster.ShrinkClusterTask
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
 import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
@@ -32,10 +37,13 @@ import org.springframework.stereotype.Component
 @Component
 class CanaryStage implements StageDefinitionBuilder, CancellableStage {
   public static final String PIPELINE_CONFIG_TYPE = "canary"
-
+  public static final Integer DEFAULT_CLUSTER_DISABLE_WAIT_TIME = 180
   @Autowired DeployCanaryStage deployCanaryStage
   @Autowired MonitorCanaryStage monitorCanaryStage
-  @Autowired ShrinkClusterTask shrinkClusterTask
+  @Autowired DestroyServerGroupTask destroyServerGroupTask
+  @Autowired OortHelper oortHelper
+  @Autowired KatoService katoService
+  @Autowired RetrySupport retrySupport
 
   @Override
   def <T extends Execution<T>> List<Stage<T>> aroundStages(Stage<T> stage) {
@@ -55,13 +63,12 @@ class CanaryStage implements StageDefinitionBuilder, CancellableStage {
   }
 
   @Override
-  CancellableStage.Result cancel(Stage stage) {
+  Result cancel(Stage stage) {
+    Collection<Map<String, Object>> disableContexts = []
+    Collection<Map<String, Object>> destroyContexts = []
+
     log.info("Cancelling stage (stageId: ${stage.id}, executionId: ${stage.execution.id}, context: ${stage.context as Map})")
 
-    // it's possible the server groups haven't been created yet, allow a grace period before cleanup
-    Thread.sleep(TimeUnit.MINUTES.toMillis(2))
-
-    Collection<Map<String, Object>> shrinkContexts = []
     stage.context.clusterPairs.each { Map<String, Map> clusterPair ->
       [clusterPair.baseline, clusterPair.canary].each { Map<String, String> cluster ->
 
@@ -70,28 +77,72 @@ class CanaryStage implements StageDefinitionBuilder, CancellableStage {
         builder.stack = cluster.stack
         builder.detail = cluster.freeFormDetails
 
-        String region = cluster.region ?: (cluster.availabilityZones as Map).keySet().first()
+        def cloudProvider = cluster.cloudProvider ?: 'aws'
+        // it's possible the server groups haven't been created yet, retry with backoff before cleanup
+        Map<String, Object> deployedCluster = [:]
+        retrySupport.retry({
+          deployedCluster = oortHelper.getCluster(cluster.application, cluster.account, builder.buildGroupName(), cloudProvider).orElse([:])
+          if (deployedCluster.serverGroups == null || deployedCluster.serverGroups?.size() == 0) {
+            throw new IllegalStateException("Expected serverGroup matching cluster {$cluster}")
+          }
+        }, 8, TimeUnit.SECONDS.toMillis(15), false)
+        Long start = stage.startTime
+        // add a small buffer to deal with latency between the cloud provider and Orca
+        Long createdTimeCutoff = (stage.endTime ?: System.currentTimeMillis()) + 5000
 
-        shrinkContexts << [
-          cluster          : builder.buildGroupName(),
-          region           : region,
-          shrinkToSize     : 0,
-          allowDeleteActive: true,
-          credentials      : cluster.account,
-          cloudProvider    : cluster.cloudProvider ?: 'aws'
-        ]
+        List<Map> serverGroups = deployedCluster.serverGroups ?: []
+
+        String clusterRegion = cluster.region ?: (cluster.availabilityZones as Map).keySet().first()
+        List<Map> matches = serverGroups.findAll {
+          it.region == clusterRegion && it.createdTime > start && it.createdTime < createdTimeCutoff
+        } ?: []
+
+        // really hope they're not running concurrent canaries in the same cluster
+        matches.each {
+          disableContexts << [
+            disableServerGroup: [
+              serverGroupName: it.name,
+              region         : it.region,
+              credentials    : cluster.account,
+              cloudProvider  : cloudProvider,
+              remainingEnabledServerGroups: 0,
+              preferLargerOverNewer       : false
+            ]
+          ]
+          destroyContexts << [
+            serverGroupName: it.name,
+            region         : it.region,
+            credentials    : cluster.account,
+            cloudProvider  : cloudProvider
+          ]
+        }
       }
     }
 
-    def shrinkResults = shrinkContexts.collect {
-      def shrinkStage = new Stage<>()
-      shrinkStage.context.putAll(it)
-      shrinkClusterTask.execute(shrinkStage)
+    if (disableContexts) {
+      try {
+        katoService.requestOperations(
+          disableContexts.first().disableServerGroup.cloudProvider,
+          disableContexts
+        ).toBlocking().first()
+        Thread.sleep(TimeUnit.SECONDS.toMillis(
+          stage.context.clusterDisableWaitTime != null ? stage.context.clusterDisableWaitTime : DEFAULT_CLUSTER_DISABLE_WAIT_TIME)
+        )
+      } catch (Exception e) {
+        log.error("Error disabling canary clusters in ${stage.id} with ${disableContexts}", e)
+      }
     }
 
-    return new CancellableStage.Result(stage, [
-      shrinkContexts: shrinkContexts,
-      shrinkResults : shrinkResults
+    def destroyResults = destroyContexts.collect {
+      def destroyStage = new Stage<>()
+      destroyStage.execution = stage.execution
+      destroyStage.context.putAll(it)
+      destroyServerGroupTask.execute(destroyStage)
+    }
+
+    return new Result(stage, [
+      destroyContexts: destroyContexts,
+      destroyResults : destroyResults
     ])
   }
 }

@@ -57,7 +57,7 @@ class MonitorKatoTask implements RetryableTask {
     this.clock = clock
   }
 
-  long getBackoffPeriod() { 10000L }
+  long getBackoffPeriod() { 5000L }
 
   long getTimeout() { 3600000L }
 
@@ -119,6 +119,9 @@ class MonitorKatoTask implements RetryableTask {
       }
       if (!stage.context.containsKey("deploy.jobs") && deployed) {
         outputs["deploy.jobs"] = deployed
+      }
+      if (!stage.context.containsKey("deploy.outputs") && deployed) {
+        outputs["deploy.outputs"] = deployed
       }
     }
     if (status == ExecutionStatus.SUCCEEDED || status == ExecutionStatus.TERMINAL || status == ExecutionStatus.RUNNING) {

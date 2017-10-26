@@ -17,6 +17,9 @@
 
 package com.netflix.spinnaker.orca.front50.migrations
 
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.function.Function
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.netflix.spectator.api.Registry
 import com.netflix.spinnaker.orca.ExecutionStatus
@@ -38,9 +41,6 @@ import redis.clients.jedis.Jedis
 import redis.clients.util.Pool
 import rx.Observable
 import rx.schedulers.Schedulers
-
-import java.util.concurrent.TimeUnit
-import java.util.function.Function
 
 @Slf4j
 @Component
@@ -68,9 +68,9 @@ class MultiRedisOrchestrationMigrationNotificationAgent extends AbstractPollingN
     this.jedisPool = jedisPool
     this.jedisPoolPrevious = jedisPoolPrevious
 
-    def queryAllScheduler = Schedulers.from(JedisExecutionRepository.newFixedThreadPool(registry, 1, "QueryAll"))
-    def queryByAppScheduler = Schedulers.from(JedisExecutionRepository.newFixedThreadPool(registry, 1, "QueryByApp"))
-    this.executionRepositoryPrevious = new JedisExecutionRepository(jedisPoolPrevious, Optional.empty(), queryAllScheduler, queryByAppScheduler, 75)
+    def queryAllScheduler = Schedulers.from(Executors.newFixedThreadPool(1))
+    def queryByAppScheduler = Schedulers.from(Executors.newFixedThreadPool(1))
+    this.executionRepositoryPrevious = new JedisExecutionRepository(registry, jedisPoolPrevious, Optional.empty(), queryAllScheduler, queryByAppScheduler, 75)
   }
 
   @Override
@@ -110,12 +110,19 @@ class MultiRedisOrchestrationMigrationNotificationAgent extends AbstractPollingN
 
     allApplications.eachWithIndex { Application application, int index ->
       def applicationName = application.name.toLowerCase()
-      def migratableOrchestrations = executionRepositoryPrevious
+      def unmigratedOrchestrations = executionRepositoryPrevious
         .retrieveOrchestrationsForApplication(applicationName, executionCriteria)
-        .filter({ orchestration -> orchestration.status.isComplete() && !previouslyMigratedOrchestrationIds.contains(orchestration.id) })
+        .filter({ orchestration -> !previouslyMigratedOrchestrationIds.contains(orchestration.id) })
         .toList()
         .toBlocking()
         .single()
+
+      def migratableOrchestrations = unmigratedOrchestrations.findAll { it.status.isComplete() }
+      def pendingOrchestrations = unmigratedOrchestrations.findAll { !it.status.isComplete() }
+
+      if (!pendingOrchestrations.isEmpty()) {
+        log.info("${pendingOrchestrations.size()} orchestrations yet to complete ${applicationName}) [${index}/${allApplications.size()}]")
+      }
 
       if (migratableOrchestrations.isEmpty()) {
         return

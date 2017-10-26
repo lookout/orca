@@ -16,7 +16,6 @@
 
 package com.netflix.spinnaker.orca.q
 
-import com.netflix.spinnaker.orca.pipeline.BranchingStageDefinitionBuilder
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder.newStage
 import com.netflix.spinnaker.orca.pipeline.TaskNode.Builder
@@ -54,8 +53,8 @@ val stageWithSyntheticBefore = object : StageDefinitionBuilder {
   }
 
   override fun <T : Execution<T>> aroundStages(stage: Stage<T>) = listOf(
-    newStage(stage.execution, singleTaskStage.type, "pre1", mutableMapOf(), stage, STAGE_BEFORE),
-    newStage(stage.execution, singleTaskStage.type, "pre2", mutableMapOf(), stage, STAGE_BEFORE)
+    newStage(stage.execution, singleTaskStage.type, "pre1", stage.context, stage, STAGE_BEFORE),
+    newStage(stage.execution, singleTaskStage.type, "pre2", stage.context, stage, STAGE_BEFORE)
   )
 }
 
@@ -63,7 +62,7 @@ val stageWithSyntheticBeforeAndNoTasks = object : StageDefinitionBuilder {
   override fun getType() = "stageWithSyntheticBeforeAndNoTasks"
 
   override fun <T : Execution<T>> aroundStages(stage: Stage<T>) = listOf(
-    newStage(stage.execution, singleTaskStage.type, "pre", mutableMapOf(), stage, STAGE_BEFORE)
+    newStage(stage.execution, singleTaskStage.type, "pre", stage.context, stage, STAGE_BEFORE)
   )
 }
 
@@ -71,8 +70,8 @@ val stageWithSyntheticBeforeAndAfterAndNoTasks = object : StageDefinitionBuilder
   override fun getType() = "stageWithSyntheticBeforeAndAfterAndNoTasks"
 
   override fun <T : Execution<T>> aroundStages(stage: Stage<T>) = listOf(
-    newStage(stage.execution, singleTaskStage.type, "pre", mutableMapOf(), stage, STAGE_BEFORE),
-    newStage(stage.execution, singleTaskStage.type, "post", mutableMapOf(), stage, STAGE_AFTER)
+    newStage(stage.execution, singleTaskStage.type, "pre", stage.context, stage, STAGE_BEFORE),
+    newStage(stage.execution, singleTaskStage.type, "post", stage.context, stage, STAGE_AFTER)
   )
 }
 
@@ -83,8 +82,8 @@ val stageWithSyntheticAfter = object : StageDefinitionBuilder {
   }
 
   override fun <T : Execution<T>> aroundStages(stage: Stage<T>) = listOf(
-    newStage(stage.execution, singleTaskStage.type, "post1", mutableMapOf(), stage, STAGE_AFTER),
-    newStage(stage.execution, singleTaskStage.type, "post2", mutableMapOf(), stage, STAGE_AFTER)
+    newStage(stage.execution, singleTaskStage.type, "post1", stage.context, stage, STAGE_AFTER),
+    newStage(stage.execution, singleTaskStage.type, "post2", stage.context, stage, STAGE_AFTER)
   )
 }
 
@@ -92,7 +91,7 @@ val stageWithSyntheticAfterAndNoTasks = object : StageDefinitionBuilder {
   override fun getType() = "stageWithSyntheticAfterAndNoTasks"
 
   override fun <T : Execution<T>> aroundStages(stage: Stage<T>) = listOf(
-    newStage(stage.execution, singleTaskStage.type, "post", mutableMapOf(), stage, STAGE_AFTER)
+    newStage(stage.execution, singleTaskStage.type, "post", stage.context, stage, STAGE_AFTER)
   )
 }
 
@@ -100,30 +99,18 @@ val stageWithNestedSynthetics = object : StageDefinitionBuilder {
   override fun getType() = "stageWithNestedSynthetics"
 
   override fun <T : Execution<T>> aroundStages(stage: Stage<T>) = listOf(
-    newStage(stage.execution, stageWithSyntheticBefore.type, "post", mutableMapOf(), stage, STAGE_AFTER)
+    newStage(stage.execution, stageWithSyntheticBefore.type, "post", stage.context, stage, STAGE_AFTER)
   )
 }
 
-val stageWithParallelBranches = object : BranchingStageDefinitionBuilder {
-  override fun <T : Execution<T>> parallelContexts(stage: Stage<T>): Collection<Map<String, Any>> =
-    listOf(
-      mapOf("region" to "us-east-1", "name" to "run in us-east-1"),
-      mapOf("region" to "us-west-2", "name" to "run in us-west-2"),
-      mapOf("region" to "eu-west-1", "name" to "run in eu-west-1")
-    )
-
-  override fun parallelStageName(stage: Stage<*>, hasParallelFlows: Boolean) =
-    if (hasParallelFlows) "is parallel" else "is not parallel"
-
-  override fun preBranchGraph(stage: Stage<*>, builder: Builder) {
-    builder.withTask("pre-branch", DummyTask::class.java)
-  }
+val stageWithParallelBranches = object : StageDefinitionBuilder {
+  override fun <T : Execution<T>> parallelStages(stage: Stage<T>) =
+    listOf("us-east-1", "us-west-2", "eu-west-1")
+      .map { region ->
+        newStage(stage.execution, singleTaskStage.type, "run in $region", stage.context + mapOf("region" to region), stage, STAGE_BEFORE)
+      }
 
   override fun <T : Execution<T>> taskGraph(stage: Stage<T>, builder: Builder) {
-    builder.withTask("in-branch", DummyTask::class.java)
-  }
-
-  override fun postBranchGraph(stage: Stage<*>, builder: Builder) {
     builder.withTask("post-branch", DummyTask::class.java)
   }
 }

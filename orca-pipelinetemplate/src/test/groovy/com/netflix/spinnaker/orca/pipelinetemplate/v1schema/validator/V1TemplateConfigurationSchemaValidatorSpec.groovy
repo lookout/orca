@@ -18,6 +18,7 @@ package com.netflix.spinnaker.orca.pipelinetemplate.v1schema.validator
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.StageDefinition
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.TemplateConfiguration
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.TemplateConfiguration.PipelineDefinition
+import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.model.TemplateConfiguration.TemplateSource
 import com.netflix.spinnaker.orca.pipelinetemplate.validator.Errors
 import spock.lang.Specification
 import spock.lang.Subject
@@ -34,7 +35,7 @@ class V1TemplateConfigurationSchemaValidatorSpec extends Specification {
     def templateConfiguration = new TemplateConfiguration(schema: schema)
 
     when:
-    subject.validate(templateConfiguration, errors)
+    subject.validate(templateConfiguration, errors, new V1TemplateConfigurationSchemaValidator.SchemaValidatorContext([]))
 
     then:
     if (hasErrors) {
@@ -56,7 +57,7 @@ class V1TemplateConfigurationSchemaValidatorSpec extends Specification {
     def templateConfiguration = new TemplateConfiguration(schema: "1", pipeline: new PipelineDefinition(application: application))
 
     when:
-    subject.validate(templateConfiguration, errors)
+    subject.validate(templateConfiguration, errors, new V1TemplateConfigurationSchemaValidator.SchemaValidatorContext([]))
 
     then:
     if (hasErrors) {
@@ -78,7 +79,10 @@ class V1TemplateConfigurationSchemaValidatorSpec extends Specification {
     def errors = new Errors()
     def templateConfiguration = new TemplateConfiguration(
       schema: "1",
-      pipeline: new PipelineDefinition(application: 'myapp'),
+      pipeline: new PipelineDefinition(
+        application: 'myapp',
+        template: new TemplateSource()
+      ),
       stages: [
         new StageDefinition(
           id: 'foo',
@@ -89,10 +93,11 @@ class V1TemplateConfigurationSchemaValidatorSpec extends Specification {
     )
 
     when:
-    subject.validate(templateConfiguration, errors)
+    subject.validate(templateConfiguration, errors, new V1TemplateConfigurationSchemaValidator.SchemaValidatorContext(templateStageIds))
 
     then:
     if (hasErrors) {
+      errors.hasErrors(true)
       errors.errors[0].message == "A configuration-defined stage should have either dependsOn or an inject rule defined"
       errors.errors[0].location == 'configuration:stages.foo'
     } else {
@@ -100,9 +105,10 @@ class V1TemplateConfigurationSchemaValidatorSpec extends Specification {
     }
 
     where:
-    dependsOn | injectFirst | hasErrors
-    null      | true        | false
-    ['bar']   | false       | false
-    null      | null        | true
+    dependsOn | injectFirst | templateStageIds | hasErrors
+    null      | true        | []               | false
+    ['bar']   | false       | []               | false
+    null      | null        | []               | true
+    null      | null        | ["foo"]          | false
   }
 }

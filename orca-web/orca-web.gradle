@@ -38,6 +38,7 @@ dependencies {
   compile project(":orca-front50")
   compile project(":orca-applications")
   compile project(":orca-flex")
+  compile project(":orca-dry-run")
   compile project(":orca-echo")
   compile project(":orca-kayenta")
   compile project(":orca-mine")
@@ -52,6 +53,7 @@ dependencies {
   compile spinnaker.dependency('korkExceptions')
   compile spinnaker.dependency("korkStackdriver")
   compile spinnaker.dependency("korkWeb")
+  compile spinnaker.dependency("logstashEncoder")
 
   spinnaker.group('test')
   testCompile project(":orca-test")

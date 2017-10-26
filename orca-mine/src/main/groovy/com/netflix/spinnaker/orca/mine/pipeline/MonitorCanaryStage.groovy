@@ -18,16 +18,18 @@ package com.netflix.spinnaker.orca.mine.pipeline
 
 import com.netflix.spinnaker.orca.CancellableStage
 import com.netflix.spinnaker.orca.clouddriver.tasks.MonitorKatoTask
+import com.netflix.spinnaker.orca.clouddriver.tasks.servergroup.ServerGroupCacheForceRefreshTask
 import com.netflix.spinnaker.orca.mine.MineService
 import com.netflix.spinnaker.orca.mine.tasks.CleanupCanaryTask
 import com.netflix.spinnaker.orca.mine.tasks.CompleteCanaryTask
+import com.netflix.spinnaker.orca.mine.tasks.DisableCanaryTask
 import com.netflix.spinnaker.orca.mine.tasks.MonitorCanaryTask
 import com.netflix.spinnaker.orca.mine.tasks.RegisterCanaryTask
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
 import com.netflix.spinnaker.orca.pipeline.TaskNode
 import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
-import com.netflix.spinnaker.orca.pipeline.util.StageNavigator
+import com.netflix.spinnaker.orca.pipeline.tasks.WaitTask
 import groovy.util.logging.Slf4j
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Component
@@ -37,13 +39,20 @@ import org.springframework.stereotype.Component
 class MonitorCanaryStage implements StageDefinitionBuilder, CancellableStage {
 
   @Autowired MineService mineService
-  @Autowired StageNavigator stageNavigator
+  @Autowired CanaryStage canaryStage
 
   @Override
   <T extends Execution<T>> void taskGraph(Stage<T> stage, TaskNode.Builder builder) {
     builder
       .withTask("registerCanary", RegisterCanaryTask)
       .withTask("monitorCanary", MonitorCanaryTask)
+      .withTask("disableCanaryCluster", DisableCanaryTask)
+      .withTask("monitorDisable", MonitorKatoTask)
+      .withTask("waitBeforeCleanup", WaitTask)
+      .withTask("disableBaselineCluster", DisableCanaryTask)
+      .withTask("monitorDisable", MonitorKatoTask)
+      .withTask("waitBeforeCleanup", WaitTask)
+      .withTask("forceCacheRefresh", ServerGroupCacheForceRefreshTask)
       .withTask("cleanupCanary", CleanupCanaryTask)
       .withTask("monitorCleanup", MonitorKatoTask)
       .withTask("completeCanary", CompleteCanaryTask)
@@ -74,16 +83,15 @@ class MonitorCanaryStage implements StageDefinitionBuilder, CancellableStage {
       log.error("Unable to cancel canary '${canaryId}' in mine", e)
     }
 
-    def canaryStages = stageNavigator.ancestors(stage).findAll {
-      it.stageBuilder instanceof CanaryStage
+    Stage canaryStageInstance = stage.ancestors().find {
+      it.type == CanaryStage.PIPELINE_CONFIG_TYPE
     }
 
-    if (!canaryStages) {
+    if (!canaryStageInstance) {
       throw new IllegalStateException("No upstream canary stage found (stageId: ${stage.id}, executionId: ${stage.execution.id})")
     }
 
-    def canary = canaryStages.first()
-    def cancelResult = ((CancellableStage) canary.stageBuilder)?.cancel(canary.stage)
+    def cancelResult = canaryStage.cancel(canaryStageInstance)
     cancelResult.details.put("canary", cancelCanaryResults)
 
     return cancelResult

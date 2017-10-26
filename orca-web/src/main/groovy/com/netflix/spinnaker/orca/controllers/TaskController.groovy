@@ -16,6 +16,9 @@
 
 package com.netflix.spinnaker.orca.controllers
 
+import com.netflix.spinnaker.orca.pipeline.OrchestrationLauncher
+import com.netflix.spinnaker.orca.pipeline.model.Task
+
 import java.time.Clock
 import com.netflix.spinnaker.orca.ExecutionStatus
 import com.netflix.spinnaker.orca.front50.Front50Service
@@ -92,7 +95,7 @@ class TaskController {
       .toInstant()
       .toEpochMilli()
 
-    executionRepository
+    def orchestrations = executionRepository
       .retrieveOrchestrationsForApplication(application, executionCriteria)
       .filter({ Orchestration orchestration -> !orchestration.startTime || (orchestration.startTime > startTimeCutoff) })
       .map({ Orchestration orchestration -> convert(orchestration) })
@@ -101,6 +104,8 @@ class TaskController {
       .toBlocking()
       .single()
       .sort(startTimeOrId)
+
+    orchestrations.subList(0, Math.min(orchestrations.size(), limit))
   }
 
   @PreAuthorize("@fiatPermissionEvaluator.storeWholePermission()")
@@ -169,7 +174,7 @@ class TaskController {
       executionRepository.retrievePipelinesForPipelineConfigId(it, executionCriteria)
     }).subscribeOn(Schedulers.io()).toList().toBlocking().single().sort(startTimeOrId)
 
-    return filterPipelinesByHistoryCutoff(allPipelines)
+    return filterPipelinesByHistoryCutoff(allPipelines, limit)
   }
 
   @PostAuthorize("hasPermission(returnObject.application, 'APPLICATION', 'READ')")
@@ -213,6 +218,8 @@ class TaskController {
   @ResponseStatus(HttpStatus.ACCEPTED)
   void pause(@PathVariable String id) {
     executionRepository.pause(id, AuthenticatedRequest.getSpinnakerUser().orElse("anonymous"))
+    def pipeline = executionRepository.retrievePipeline(id)
+    executionRunner.reschedule(pipeline)
   }
 
   @PreAuthorize("hasPermission(this.getPipeline(#id)?.application, 'APPLICATION', 'WRITE')")
@@ -258,6 +265,8 @@ class TaskController {
       stage.context["lastModifiedBy"] = AuthenticatedRequest.getSpinnakerUser().orElse("anonymous")
 
       executionRepository.storeStage(stage)
+
+      executionRunner.reschedule(pipeline)
     }
     pipeline
   }
@@ -322,10 +331,10 @@ class TaskController {
       executionRepository.retrievePipelinesForPipelineConfigId(it, executionCriteria)
     }).subscribeOn(Schedulers.io()).toList().toBlocking().single().sort(startTimeOrId)
 
-    return filterPipelinesByHistoryCutoff(allPipelines)
+    return filterPipelinesByHistoryCutoff(allPipelines, limit)
   }
 
-  private List<Pipeline> filterPipelinesByHistoryCutoff(List<Pipeline> pipelines) {
+  private List<Pipeline> filterPipelinesByHistoryCutoff(List<Pipeline> pipelines, int limit) {
     // TODO-AJ The eventual goal is to return `allPipelines` without the need to group + filter below (WIP)
     def cutoffTime = (new Date(clock.millis()) - daysOfExecutionHistory).time
 
@@ -343,7 +352,7 @@ class TaskController {
         recentPipelines = sortedPipelinesGroup[0..upperBounds]
       }
 
-      pipelinesSatisfyingCutoff.addAll(recentPipelines)
+      pipelinesSatisfyingCutoff.addAll(recentPipelines.subList(0, Math.min(recentPipelines.size(), limit)))
     }
 
     return pipelinesSatisfyingCutoff.sort(startTimeOrId)

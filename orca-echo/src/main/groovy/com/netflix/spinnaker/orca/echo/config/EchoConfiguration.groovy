@@ -17,6 +17,7 @@
 package com.netflix.spinnaker.orca.echo.config
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.netflix.spinnaker.config.DryRunProperties
 import com.netflix.spinnaker.orca.echo.EchoService
 import com.netflix.spinnaker.orca.echo.spring.EchoNotifyingExecutionListener
 import com.netflix.spinnaker.orca.echo.spring.EchoNotifyingStageListener
@@ -83,11 +84,22 @@ class EchoConfiguration {
   }
 
   @Bean
-  EchoNotifyingExecutionListener echoNotifyingPipelineExecutionListener(EchoService echoService,
-                                                                        Front50Service front50Service,
-                                                                        ObjectMapper objectMapper,
-                                                                        ContextParameterProcessor contextParameterProcessor) {
-    new EchoNotifyingExecutionListener(echoService, front50Service, objectMapper, contextParameterProcessor)
+  EchoNotifyingExecutionListener echoNotifyingPipelineExecutionListener(
+    EchoService echoService,
+    Front50Service front50Service,
+    ObjectMapper objectMapper,
+    ContextParameterProcessor contextParameterProcessor,
+    Optional<DryRunProperties> dryRunProperties) {
+    new EchoNotifyingExecutionListener(
+      echoService,
+      front50Service,
+      objectMapper,
+      contextParameterProcessor,
+      dryRunProperties
+        .map { it.pipelineIds }
+        .orElse([])
+        .toSet()
+    )
   }
 
   @Bean
