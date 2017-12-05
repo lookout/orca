@@ -58,7 +58,7 @@ public class EcsImageFinder implements ImageFinder {
       .sorted()
       .collect(Collectors.toList());
 
-    HashSet<ImageDetails> response = Sets.newHashSet(allMatchedImages.get(0).toImageDetails("us-west-2"));
+    HashSet<ImageDetails> response = Sets.newHashSet(allMatchedImages.get(0).toImageDetails());
     return response;
   }
 
@@ -91,16 +91,11 @@ public class EcsImageFinder implements ImageFinder {
     @JsonProperty
     Map<String, List<String>> amis;
 
-    ImageDetails toImageDetails(String region) {
+    @JsonProperty
+    String region;
+
+    ImageDetails toImageDetails() {
       String imageId = amis.get(region).get(0);
-
-//      Map<String, String> imageTags = tagsByImageId.get(imageId);
-//      AppVersion appVersion = AppVersion.parseName(imageTags.get("appversion"));
-
-//      JenkinsDetails jenkinsDetails = Optional
-//        .ofNullable(appVersion)
-//        .map(av -> new JenkinsDetails(imageTags.get("build_host"), av.getBuildJobName(), av.getBuildNumber()))
-//        .orElse(null);
 
       return new EcsImageDetails(
         imageId, imageName, region, new JenkinsDetails("host", "name", "1337001")
