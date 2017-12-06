@@ -51,9 +51,4 @@ class PipelineTemplateController {
   String convertPipelineToPipelineTemplate(@RequestBody Map<String, Object> pipeline) {
     new PipelineTemplateConverter().convertToPipelineTemplate(pipeline)
   }
-
-  @RequestMapping(value = "/convertPipelineToTemplate", method = RequestMethod.POST, produces = 'text/x-yaml')
-  String convertPipelineToPipelineTemplate(@RequestBody Map<String, Object> pipeline) {
-    new PipelineTemplateConverter().convertToPipelineTemplate(pipeline)
-  }
 }
