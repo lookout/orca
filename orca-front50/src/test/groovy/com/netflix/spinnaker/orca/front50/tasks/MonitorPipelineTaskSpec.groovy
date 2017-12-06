@@ -32,7 +32,7 @@ class MonitorPipelineTaskSpec extends Specification {
   @Subject
   MonitorPipelineTask task = new MonitorPipelineTask()
   ExecutionRepository repo = Mock(ExecutionRepository)
-  Stage stage = new Stage<>(type: "whatever")
+  Stage stage = new Stage(type: "whatever")
 
   def setup() {
     task.executionRepository = repo
@@ -51,7 +51,7 @@ class MonitorPipelineTaskSpec extends Specification {
       status = providedStatus
     }
 
-    repo.retrievePipeline(_) >> pipeline
+    repo.retrieve(*_) >> pipeline
 
     when:
     def result = task.execute(stage)
@@ -104,17 +104,29 @@ class MonitorPipelineTaskSpec extends Specification {
       status = ExecutionStatus.TERMINAL
     }
 
-    repo.retrievePipeline(_) >> pipeline
+    repo.retrieve(*_) >> pipeline
 
     when:
     def result = task.execute(stage)
+    def exception = result.context.exception
 
     then:
-    result.context.exception == [details: [errors: [
-      "Exception in child pipeline stage (some child: a pipeline): Some error",
-      "Exception in child pipeline stage (some child: pipeline): Some other error",
-      "Exception in child pipeline stage (some child: deploy): task failed, no exception",
-      "Exception in child pipeline stage (some child: deploy): task had exception"
-    ]]]
+    exception == [
+      details: [
+        errors: [
+          "Exception in child pipeline stage (some child: a pipeline): Some error",
+          "Exception in child pipeline stage (some child: pipeline): Some other error",
+          "Exception in child pipeline stage (some child: deploy): task failed, no exception",
+          "Exception in child pipeline stage (some child: deploy): task had exception"
+        ]
+      ],
+      // source should reference the _first_ halted stage in the child pipeline
+      source: [
+        executionId: pipeline.id,
+        stageId: pipeline.stages[1].id,
+        stageName: "a pipeline",
+        stageIndex: 1
+      ]
+    ]
   }
 }

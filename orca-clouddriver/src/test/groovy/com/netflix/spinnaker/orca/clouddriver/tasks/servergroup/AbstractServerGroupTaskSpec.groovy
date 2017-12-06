@@ -17,11 +17,12 @@
 package com.netflix.spinnaker.orca.clouddriver.tasks.servergroup
 
 import com.netflix.spinnaker.orca.ExecutionStatus
+import com.netflix.spinnaker.kork.core.RetrySupport
 import com.netflix.spinnaker.orca.clouddriver.KatoService
 import com.netflix.spinnaker.orca.clouddriver.model.TaskId
 import com.netflix.spinnaker.orca.clouddriver.pipeline.servergroup.support.TargetServerGroup
 import com.netflix.spinnaker.orca.clouddriver.pipeline.servergroup.support.TargetServerGroupResolver
-import com.netflix.spinnaker.orca.pipeline.model.Pipeline
+import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import spock.lang.Specification
 import spock.lang.Subject
@@ -35,8 +36,12 @@ class AbstractServerGroupTaskSpec extends Specification {
   }
 
   @Subject
-    task = new TestServerGroupTask()
-  def stage = new Stage<>(new Pipeline("orca"), "whatever")
+    task = new TestServerGroupTask(
+      retrySupport: Spy(RetrySupport) {
+        _ * sleep(_) >> { /* do nothing */ }
+      }
+    )
+  def stage = new Stage(Execution.newPipeline("orca"), "whatever")
   def taskId = new TaskId(UUID.randomUUID().toString())
 
   def stageContext = [
@@ -101,7 +106,7 @@ class AbstractServerGroupTaskSpec extends Specification {
     def result = task.execute(stage)
 
     then:
-      1 * TargetServerGroupResolver.fromPreviousStage(stage) >> new TargetServerGroup(
+      2 * TargetServerGroupResolver.fromPreviousStage(stage) >> new TargetServerGroup(
         name: "foo-v001", region: "us-east-1"
       )
     result.context.asgName == "foo-v001"

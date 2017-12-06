@@ -26,13 +26,11 @@ import com.netflix.spinnaker.orca.bakery.tasks.CreateBakeTask
 import com.netflix.spinnaker.orca.bakery.tasks.MonitorBakeTask
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
 import com.netflix.spinnaker.orca.pipeline.TaskNode
-import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import groovy.transform.CompileDynamic
 import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
 import org.springframework.stereotype.Component
-
 import static com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner.STAGE_BEFORE
 
 @Slf4j
@@ -43,7 +41,7 @@ class BakeStage implements StageDefinitionBuilder, RestartableStage {
   public static final String PIPELINE_CONFIG_TYPE = "bake"
 
   @Override
-  <T extends Execution<T>> void taskGraph(Stage<T> stage, TaskNode.Builder builder) {
+  void taskGraph(Stage stage, TaskNode.Builder builder) {
     if (isTopLevelStage(stage)) {
       builder
         .withTask("completeParallel", CompleteParallelBakeTask)
@@ -57,8 +55,8 @@ class BakeStage implements StageDefinitionBuilder, RestartableStage {
 
   @Override
   @Nonnull
-  <T extends Execution<T>> List<Stage<T>> parallelStages(
-    @Nonnull Stage<T> stage
+  List<Stage> parallelStages(
+    @Nonnull Stage stage
   ) {
     if (isTopLevelStage(stage)) {
       return parallelContexts(stage).collect { context ->
@@ -69,12 +67,12 @@ class BakeStage implements StageDefinitionBuilder, RestartableStage {
     }
   }
 
-  private boolean isTopLevelStage(Stage<?> stage) {
+  private boolean isTopLevelStage(Stage stage) {
     stage.parentStageId == null
   }
 
   @CompileDynamic
-  <T extends Execution<T>> Collection<Map<String, Object>> parallelContexts(Stage<T> stage) {
+  Collection<Map<String, Object>> parallelContexts(Stage stage) {
     Set<String> deployRegions = stage.context.region ? [stage.context.region] as Set<String> : []
     deployRegions.addAll(stage.context.regions as Set<String> ?: [])
 
@@ -127,10 +125,12 @@ class BakeStage implements StageDefinitionBuilder, RestartableStage {
         it.parentStageId == stage.parentStageId && it.status == ExecutionStatus.RUNNING
       }
 
+      def relatedBakeStages = stage.execution.stages.findAll {
+        it.type == PIPELINE_CONFIG_TYPE && bakeInitializationStages*.id.contains(it.parentStageId)
+      }
+
       def globalContext = [
-        deploymentDetails: stage.execution.stages.findAll {
-          it.type == PIPELINE_CONFIG_TYPE && bakeInitializationStages*.id.contains(it.parentStageId) && (it.context.ami || it.context.imageId)
-        }.collect { Stage bakeStage ->
+        deploymentDetails: relatedBakeStages.findAll{it.context.ami || it.context.imageId}.collect { Stage bakeStage ->
           def deploymentDetails = [:]
           ["ami", "imageId", "amiSuffix", "baseLabel", "baseOs", "refId", "storeType", "vmType", "region", "package", "cloudProviderType", "cloudProvider"].each {
             if (bakeStage.context.containsKey(it)) {

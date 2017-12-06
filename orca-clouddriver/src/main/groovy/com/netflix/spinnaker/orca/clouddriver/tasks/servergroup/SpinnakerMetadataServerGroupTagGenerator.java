@@ -16,22 +16,21 @@
 
 package com.netflix.spinnaker.orca.clouddriver.tasks.servergroup;
 
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 import com.netflix.frigga.Names;
-import com.netflix.spinnaker.orca.RetrySupport;
+import com.netflix.spinnaker.kork.core.RetrySupport;
 import com.netflix.spinnaker.orca.clouddriver.OortService;
 import com.netflix.spinnaker.orca.pipeline.model.Execution;
-import com.netflix.spinnaker.orca.pipeline.model.Orchestration;
-import com.netflix.spinnaker.orca.pipeline.model.Pipeline;
 import com.netflix.spinnaker.orca.pipeline.model.Stage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import retrofit.RetrofitError;
-
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
+import static com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType.ORCHESTRATION;
+import static com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType.PIPELINE;
 
 @Component
 public class SpinnakerMetadataServerGroupTagGenerator implements ServerGroupEntityTagGenerator {
@@ -45,25 +44,29 @@ public class SpinnakerMetadataServerGroupTagGenerator implements ServerGroupEnti
   }
 
   @Override
-  public Collection<Map<String, Object>> generateTags(Stage stage, String serverGroup, String account, String location, String cloudProvider) {
+  public Collection<Map<String, Object>> generateTags(Stage stage,
+                                                      String serverGroup,
+                                                      String account,
+                                                      String location,
+                                                      String cloudProvider) {
     Execution execution = stage.getExecution();
     Map context = stage.getContext();
 
     Map<String, Object> value = new HashMap<>();
     value.put("stageId", stage.getId());
     value.put("executionId", execution.getId());
-    value.put("executionType", execution.getClass().getSimpleName().toLowerCase());
+    value.put("executionType", execution.getType().toString());
     value.put("application", execution.getApplication());
 
     if (execution.getAuthentication() != null) {
       value.put("user", execution.getAuthentication().getUser());
     }
 
-    if (execution instanceof Orchestration) {
-      value.put("description", ((Orchestration) execution).getDescription());
-    } else if (execution instanceof Pipeline) {
+    if (execution.getType() == ORCHESTRATION) {
+      value.put("description", execution.getDescription());
+    } else if (execution.getType() == PIPELINE) {
       value.put("description", execution.getName());
-      value.put("pipelineConfigId", ((Pipeline) execution).getPipelineConfigId());
+      value.put("pipelineConfigId", execution.getPipelineConfigId());
     }
 
     if (context.containsKey("reason") && context.get("reason") != null) {
@@ -77,12 +80,13 @@ public class SpinnakerMetadataServerGroupTagGenerator implements ServerGroupEnti
     try {
       cluster = Names.parseName(serverGroup).getCluster();
 
-      Map<String, Object> previousServerGroup = getPreviousServerGroup(
+      Map<String, Object> previousServerGroup = getPreviousServerGroupFromCluster(
         execution.getApplication(),
         account,
         cluster,
         cloudProvider,
-        location
+        location,
+        serverGroup
       );
 
       if (previousServerGroup != null) {
@@ -100,48 +104,76 @@ public class SpinnakerMetadataServerGroupTagGenerator implements ServerGroupEnti
     return Collections.singletonList(tag);
   }
 
-  Map<String, Object> getPreviousServerGroup(String application,
-                                             String account,
-                                             String cluster,
-                                             String cloudProvider,
-                                             String location) {
+  Map<String, Object> getPreviousServerGroupFromCluster(String application,
+                                                        String account,
+                                                        String cluster,
+                                                        String cloudProvider,
+                                                        String location,
+                                                        String createdServerGroup) {
     if (cloudProvider.equals("titus")) {
-      // TODO-AJ titus does not force cache refresh so `ANCESTOR` will return inconsistent results
-      return null;
+      // titus does not (currently!) force cache refresh to it's possible that `NEWEST` is actually the `ANCESTOR` to
+      // the just created server group
+      Map<String, Object> newestServerGroup = retrySupport.retry(() -> {
+        return getPreviousServerGroupFromClusterByTarget(
+          application, account, cluster, cloudProvider, location, "NEWEST"
+        );
+      }, 12, 5000, false); // retry for up to one minute
+
+      if (newestServerGroup == null) {
+        // cluster has no enabled server groups
+        return null;
+      }
+
+      if (!newestServerGroup.get("name").equals(createdServerGroup)) {
+        // if the `NEWEST` server group is _NOT_ what was just created, we've found our `ANCESTOR`
+        // if not, fall through to an explicit `ANCESTOR` lookup
+        return newestServerGroup;
+      }
     }
 
     return retrySupport.retry(() -> {
-      try {
-        Map<String, Object> targetServerGroup = oortService.getServerGroupSummary(
-          application,
-          account,
-          cluster,
-          cloudProvider,
-          location,
-          "ANCESTOR",
-          "image",
-          "true"
-        );
-
-        Map<String, Object> previousServerGroup = new HashMap<>();
-        previousServerGroup.put("name", targetServerGroup.get("serverGroupName"));
-        previousServerGroup.put("imageName", targetServerGroup.get("imageName"));
-        previousServerGroup.put("imageId", targetServerGroup.get("imageId"));
-        previousServerGroup.put("cloudProvider", cloudProvider);
-
-        if (targetServerGroup.containsKey("buildInfo")) {
-          previousServerGroup.put("buildInfo", targetServerGroup.get("buildInfo"));
-        }
-
-        return previousServerGroup;
-      } catch (RetrofitError e) {
-        if (e.getKind() == RetrofitError.Kind.HTTP && e.getResponse().getStatus() == 404) {
-          // it's ok if the previous server group does not exist
-          return null;
-        }
-
-        throw e;
-      }
+      return getPreviousServerGroupFromClusterByTarget(
+        application, account, cluster, cloudProvider, location, "ANCESTOR"
+      );
     }, 12, 5000, false); // retry for up to one minute
+  }
+
+  Map<String, Object> getPreviousServerGroupFromClusterByTarget(String application,
+                                                                String account,
+                                                                String cluster,
+                                                                String cloudProvider,
+                                                                String location,
+                                                                String target) {
+    try {
+      Map<String, Object> targetServerGroup = oortService.getServerGroupSummary(
+        application,
+        account,
+        cluster,
+        cloudProvider,
+        location,
+        target,
+        "image",
+        "true"
+      );
+
+      Map<String, Object> previousServerGroup = new HashMap<>();
+      previousServerGroup.put("name", targetServerGroup.get("serverGroupName"));
+      previousServerGroup.put("imageName", targetServerGroup.get("imageName"));
+      previousServerGroup.put("imageId", targetServerGroup.get("imageId"));
+      previousServerGroup.put("cloudProvider", cloudProvider);
+
+      if (targetServerGroup.containsKey("buildInfo")) {
+        previousServerGroup.put("buildInfo", targetServerGroup.get("buildInfo"));
+      }
+
+      return previousServerGroup;
+    } catch (RetrofitError e) {
+      if (e.getKind() == RetrofitError.Kind.HTTP && e.getResponse().getStatus() == 404) {
+        // it's ok if the previous server group does not exist
+        return null;
+      }
+
+      throw e;
+    }
   }
 }

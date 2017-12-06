@@ -38,12 +38,18 @@ class PipelineTemplateController {
   PipelineTemplateService pipelineTemplateService
 
   @RequestMapping(value = "/pipelineTemplate", method = RequestMethod.GET)
-  PipelineTemplate getPipelineTemplate(@RequestParam("source") String source) {
-    if (source == null || source?.empty) {
+  PipelineTemplate getPipelineTemplate(@RequestParam String source,
+                                       @RequestParam(required = false) String executionId,
+                                       @RequestParam(required = false) String pipelineConfigId) {
+    if (!source) {
       throw new InvalidRequestException("template source must not be empty")
     }
+    pipelineTemplateService.resolveTemplate(new TemplateSource(source: source), executionId, pipelineConfigId)
+  }
 
-    pipelineTemplateService.resolveTemplate(new TemplateSource(source: source))
+  @RequestMapping(value = "/convertPipelineToTemplate", method = RequestMethod.POST, produces = 'text/x-yaml')
+  String convertPipelineToPipelineTemplate(@RequestBody Map<String, Object> pipeline) {
+    new PipelineTemplateConverter().convertToPipelineTemplate(pipeline)
   }
 
   @RequestMapping(value = "/convertPipelineToTemplate", method = RequestMethod.POST, produces = 'text/x-yaml')

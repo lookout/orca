@@ -16,7 +16,9 @@
 
 package com.netflix.spinnaker.orca.clouddriver.tasks.servergroup
 
+import com.netflix.spinnaker.moniker.Moniker
 import com.netflix.spinnaker.orca.ExecutionStatus
+import com.netflix.spinnaker.kork.core.RetrySupport
 import com.netflix.spinnaker.orca.RetryableTask
 import com.netflix.spinnaker.orca.TaskResult
 import com.netflix.spinnaker.orca.clouddriver.KatoService
@@ -25,6 +27,7 @@ import com.netflix.spinnaker.orca.clouddriver.pipeline.servergroup.support.Locat
 import com.netflix.spinnaker.orca.clouddriver.pipeline.servergroup.support.TargetServerGroup
 import com.netflix.spinnaker.orca.clouddriver.pipeline.servergroup.support.TargetServerGroupResolver
 import com.netflix.spinnaker.orca.clouddriver.tasks.AbstractCloudProviderAwareTask
+import com.netflix.spinnaker.orca.clouddriver.utils.MonikerHelper
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import org.springframework.beans.factory.annotation.Autowired
 
@@ -37,17 +40,20 @@ abstract class AbstractServerGroupTask extends AbstractCloudProviderAwareTask im
 
   @Override
   long getTimeout() {
-    return 60000
+    return 90000
   }
 
   @Autowired
   KatoService kato
 
+  @Autowired
+  RetrySupport retrySupport
+
   protected boolean isAddTargetOpOutputs() {
     false
   }
 
-  protected void validateClusterStatus(Map operation) {}
+  protected void validateClusterStatus(Map operation, Moniker moniker) {}
 
   abstract String getServerGroupAction()
 
@@ -58,9 +64,11 @@ abstract class AbstractServerGroupTask extends AbstractCloudProviderAwareTask im
   TaskResult execute(Stage stage) {
     String cloudProvider = getCloudProvider(stage)
     String account = getCredentials(stage)
-
     def operation = convert(stage)
-    validateClusterStatus(operation)
+    Moniker moniker = convertMoniker(stage)
+    retrySupport.retry({
+      validateClusterStatus(operation, moniker)
+    }, 6, 5000, false) // retry for up to 30 seconds
     if (!operation) {
       // nothing to do but succeed
       return new TaskResult(ExecutionStatus.SUCCEEDED)
@@ -108,6 +116,16 @@ abstract class AbstractServerGroupTask extends AbstractCloudProviderAwareTask im
     operation
   }
 
+  Moniker convertMoniker(Stage stage) {
+    if (TargetServerGroup.isDynamicallyBound(stage)) {
+      TargetServerGroup tsg = TargetServerGroupResolver.fromPreviousStage(stage);
+      return  tsg.getMoniker() == null ? MonikerHelper.friggaToMoniker(tsg.getName()) : tsg.getMoniker();
+    }
+    String serverGroupName = (String) stage.context.serverGroupName;
+    String asgName = (String) stage.context.asgName;
+    return MonikerHelper.monikerFromStage(stage, asgName ?: serverGroupName);
+  }
+
   /**
    * @return a Map of location -> server group name
    */
@@ -138,5 +156,4 @@ abstract class AbstractServerGroupTask extends AbstractCloudProviderAwareTask im
         operation.namespace ? new Location(Type.NAMESPACE, operation.namespace) :
           null
   }
-
 }

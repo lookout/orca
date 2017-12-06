@@ -2,7 +2,7 @@ package com.netflix.spinnaker.orca.mine.pipeline
 
 import com.netflix.spinnaker.orca.ExecutionStatus
 import com.netflix.spinnaker.orca.mine.MineService
-import com.netflix.spinnaker.orca.pipeline.model.Pipeline
+import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import com.netflix.spinnaker.orca.pipeline.model.Task
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository
@@ -29,7 +29,7 @@ class AcaTaskStageSpec extends Specification {
   def "restart aca task should cancel off the original canary and clean up the stage context"() {
     given:
     def executionRepository = Mock(ExecutionRepository)
-    def pipeline = new Pipeline("orca")
+    def pipeline = Execution.newPipeline("orca")
 
     def canary = createCanary('123');
     def context = [canary: canary.clone()]
@@ -47,11 +47,13 @@ class AcaTaskStageSpec extends Specification {
     and: "preserve the canary config"
     stage.context.canary.canaryConfig == canary.canaryConfig
 
+    and: "the deployment details"
+    stage.context.canary.canaryDeployments == canary.canaryDeployments
+
     and: "clean up the canary"
     stage.context.canary.id == null
     stage.context.canary.launchDate == null
     stage.context.canary.endDate == null
-    stage.context.canary.canaryDeployments == null
     stage.context.canary.canaryResult == null
     stage.context.canary.status == null
     stage.context.canary.health == null
@@ -72,7 +74,7 @@ class AcaTaskStageSpec extends Specification {
   def "restart aca task should not cancel off the original canary if there is no canary id and clean up the stage context"() {
     given:
     def executionRepository = Mock(ExecutionRepository)
-    def pipeline = new Pipeline("orca")
+    def pipeline = Execution.newPipeline("orca")
 
     def canary = createCanary()
     def context = [canary: canary.clone()]
@@ -90,11 +92,13 @@ class AcaTaskStageSpec extends Specification {
     and: "preserve the canary config"
     stage.context.canary.canaryConfig == canary.canaryConfig
 
+    and: "the deployment details"
+    stage.context.canary.canaryDeployments == canary.canaryDeployments
+
     and: "clean up the canary"
     stage.context.canary.id == null
     stage.context.canary.launchDate == null
     stage.context.canary.endDate == null
-    stage.context.canary.canaryDeployments == null
     stage.context.canary.canaryResult == null
     stage.context.canary.status == null
     stage.context.canary.health == null
@@ -129,8 +133,8 @@ class AcaTaskStageSpec extends Specification {
     canary
   }
 
-  def createStage(Pipeline pipeline, Map<String, Object> context) {
-    Stage stage = new Stage<>(pipeline, "acaTask", "ACA Task", context)
+  def createStage(Execution pipeline, Map<String, Object> context) {
+    Stage stage = new Stage(pipeline, "acaTask", "ACA Task", context)
     stage.tasks = [
       new Task(
         id: "1",

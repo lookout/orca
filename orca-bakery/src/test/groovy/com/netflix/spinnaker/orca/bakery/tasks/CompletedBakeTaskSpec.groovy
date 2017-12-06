@@ -16,11 +16,12 @@
 
 package com.netflix.spinnaker.orca.bakery.tasks
 
+import com.netflix.spinnaker.kork.artifacts.model.Artifact
 import com.netflix.spinnaker.orca.ExecutionStatus
 import com.netflix.spinnaker.orca.bakery.api.Bake
 import com.netflix.spinnaker.orca.bakery.api.BakeStatus
 import com.netflix.spinnaker.orca.bakery.api.BakeryService
-import com.netflix.spinnaker.orca.pipeline.model.Pipeline
+import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import retrofit.RetrofitError
 import retrofit.client.Response
@@ -35,7 +36,7 @@ class CompletedBakeTaskSpec extends Specification {
 
   @Subject task = new CompletedBakeTask()
 
-  @Shared Pipeline pipeline = pipeline()
+  @Shared Execution pipeline = pipeline()
 
   @Shared notFoundError = RetrofitError.httpError(
     null,
@@ -44,14 +45,14 @@ class CompletedBakeTaskSpec extends Specification {
     null
   )
 
-  def "finds the AMI created by a bake"() {
+  def "finds the AMI and artifact created by a bake"() {
     given:
     task.bakery = Stub(BakeryService) {
-      lookupBake(region, bakeId) >> Observable.from(new Bake(id: bakeId, ami: ami))
+      lookupBake(region, bakeId) >> Observable.from(new Bake(id: bakeId, ami: ami, artifact: artifact))
     }
 
     and:
-    def stage = new Stage<>(pipeline, "bake", [region: region, status: new BakeStatus(resourceId: bakeId)])
+    def stage = new Stage(pipeline, "bake", [region: region, status: new BakeStatus(resourceId: bakeId)])
 
     when:
     def result = task.execute(stage)
@@ -59,11 +60,13 @@ class CompletedBakeTaskSpec extends Specification {
     then:
     result.status == ExecutionStatus.SUCCEEDED
     result.context.ami == ami
+    result.context.artifact.reference == ami
 
     where:
     region = "us-west-1"
     bakeId = "b-5af233wjj78mwt2f420wt8ey3w"
     ami = "ami-280c3b6d"
+    artifact = new Artifact(reference: ami)
   }
 
   def "fails if the bake is not found"() {
@@ -73,7 +76,7 @@ class CompletedBakeTaskSpec extends Specification {
     }
 
     and:
-    def stage = new Stage<>(pipeline, "bake", [region: region, status: new BakeStatus(resourceId: bakeId)])
+    def stage = new Stage(pipeline, "bake", [region: region, status: new BakeStatus(resourceId: bakeId)])
 
     when:
     task.execute(stage)

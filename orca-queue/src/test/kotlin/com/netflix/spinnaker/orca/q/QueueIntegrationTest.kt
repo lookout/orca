@@ -33,7 +33,7 @@ import com.netflix.spinnaker.orca.pipeline.RestrictExecutionDuringTimeWindow
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder.newStage
 import com.netflix.spinnaker.orca.pipeline.TaskNode.Builder
-import com.netflix.spinnaker.orca.pipeline.model.Execution
+import com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType.PIPELINE
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner.STAGE_BEFORE
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository
@@ -62,10 +62,7 @@ import java.time.Instant.now
 import java.time.ZoneId
 
 @SpringBootTest(classes = arrayOf(TestConfig::class), properties = arrayOf(
-  "queue.retry.delay.ms=10"//,
-//  "logging.level.root=ERROR",
-//  "logging.level.org.springframework.test=ERROR",
-//  "logging.level.com.netflix.spinnaker=FATAL"
+  "queue.retry.delay.ms=10"
 ))
 @RunWith(SpringRunner::class)
 open class QueueIntegrationTest {
@@ -80,17 +77,21 @@ open class QueueIntegrationTest {
   lateinit var timeZoneId: String
   private val timeZone by lazy { ZoneId.of(timeZoneId) }
 
-  @Before fun discoveryUp() {
+  @Before
+  fun discoveryUp() {
     context.publishEvent(RemoteStatusChangedEvent(StatusChangeEvent(STARTING, UP)))
   }
 
-  @After fun discoveryDown() {
+  @After
+  fun discoveryDown() {
     context.publishEvent(RemoteStatusChangedEvent(StatusChangeEvent(UP, OUT_OF_SERVICE)))
   }
 
-  @After fun resetMocks() = reset(dummyTask)
+  @After
+  fun resetMocks() = reset(dummyTask)
 
-  @Test fun `can run a simple pipeline`() {
+  @Test
+  fun `can run a simple pipeline`() {
     val pipeline = pipeline {
       application = "spinnaker"
       stage {
@@ -105,10 +106,11 @@ open class QueueIntegrationTest {
 
     context.runToCompletion(pipeline, runner::start, repository)
 
-    repository.retrievePipeline(pipeline.id).status shouldEqual SUCCEEDED
+    repository.retrieve(PIPELINE, pipeline.id).status shouldEqual SUCCEEDED
   }
 
-  @Test fun `will run tasks to completion`() {
+  @Test
+  fun `will run tasks to completion`() {
     val pipeline = pipeline {
       application = "spinnaker"
       stage {
@@ -123,10 +125,11 @@ open class QueueIntegrationTest {
 
     context.runToCompletion(pipeline, runner::start, repository)
 
-    repository.retrievePipeline(pipeline.id).status shouldEqual SUCCEEDED
+    repository.retrieve(PIPELINE, pipeline.id).status shouldEqual SUCCEEDED
   }
 
-  @Test fun `can run a fork join pipeline`() {
+  @Test
+  fun `can run a fork join pipeline`() {
     val pipeline = pipeline {
       application = "spinnaker"
       stage {
@@ -156,7 +159,7 @@ open class QueueIntegrationTest {
 
     context.runToCompletion(pipeline, runner::start, repository)
 
-    repository.retrievePipeline(pipeline.id).apply {
+    repository.retrieve(PIPELINE, pipeline.id).apply {
       status shouldEqual SUCCEEDED
       stageByRef("1").status shouldEqual SUCCEEDED
       stageByRef("2a").status shouldEqual SUCCEEDED
@@ -165,7 +168,8 @@ open class QueueIntegrationTest {
     }
   }
 
-  @Test fun `can run a pipeline that ends in a branch`() {
+  @Test
+  fun `can run a pipeline that ends in a branch`() {
     val pipeline = pipeline {
       application = "spinnaker"
       stage {
@@ -195,7 +199,7 @@ open class QueueIntegrationTest {
 
     context.runToCompletion(pipeline, runner::start, repository)
 
-    repository.retrievePipeline(pipeline.id).apply {
+    repository.retrieve(PIPELINE, pipeline.id).apply {
       status shouldEqual SUCCEEDED
       stageByRef("1").status shouldEqual SUCCEEDED
       stageByRef("2a").status shouldEqual SUCCEEDED
@@ -204,7 +208,8 @@ open class QueueIntegrationTest {
     }
   }
 
-  @Test fun `can skip stages`() {
+  @Test
+  fun `can skip stages`() {
     val pipeline = pipeline {
       application = "spinnaker"
       stage {
@@ -220,12 +225,13 @@ open class QueueIntegrationTest {
 
     context.runToCompletion(pipeline, runner::start, repository)
 
-    repository.retrievePipeline(pipeline.id).status shouldEqual SUCCEEDED
+    repository.retrieve(PIPELINE, pipeline.id).status shouldEqual SUCCEEDED
 
     verify(dummyTask, never()).execute(any())
   }
 
-  @Test fun `pipeline fails if a task fails`() {
+  @Test
+  fun `pipeline fails if a task fails`() {
     val pipeline = pipeline {
       application = "spinnaker"
       stage {
@@ -239,10 +245,11 @@ open class QueueIntegrationTest {
 
     context.runToCompletion(pipeline, runner::start, repository)
 
-    repository.retrievePipeline(pipeline.id).status shouldEqual TERMINAL
+    repository.retrieve(PIPELINE, pipeline.id).status shouldEqual TERMINAL
   }
 
-  @Test fun `parallel stages that fail cancel other branches`() {
+  @Test
+  fun `parallel stages that fail cancel other branches`() {
     val pipeline = pipeline {
       application = "spinnaker"
       stage {
@@ -273,12 +280,12 @@ open class QueueIntegrationTest {
     repository.store(pipeline)
 
     whenever(dummyTask.timeout) doReturn 2000L
-    whenever(dummyTask.execute(argThat { getRefId() == "2a1" })) doReturn TaskResult(TERMINAL)
-    whenever(dummyTask.execute(argThat { getRefId() != "2a1" })) doReturn TaskResult.SUCCEEDED
+    whenever(dummyTask.execute(argThat { refId == "2a1" })) doReturn TaskResult(TERMINAL)
+    whenever(dummyTask.execute(argThat { refId != "2a1" })) doReturn TaskResult.SUCCEEDED
 
     context.runToCompletion(pipeline, runner::start, repository)
 
-    repository.retrievePipeline(pipeline.id).apply {
+    repository.retrieve(PIPELINE, pipeline.id).apply {
       status shouldEqual TERMINAL
       stageByRef("1").status shouldEqual SUCCEEDED
       stageByRef("2a1").status shouldEqual TERMINAL
@@ -288,7 +295,8 @@ open class QueueIntegrationTest {
     }
   }
 
-  @Test fun `stages set to allow failure will proceed in spite of errors`() {
+  @Test
+  fun `stages set to allow failure will proceed in spite of errors`() {
     val pipeline = pipeline {
       application = "spinnaker"
       stage {
@@ -320,12 +328,12 @@ open class QueueIntegrationTest {
     repository.store(pipeline)
 
     whenever(dummyTask.timeout) doReturn 2000L
-    whenever(dummyTask.execute(argThat { getRefId() == "2a1" })) doReturn TaskResult(TERMINAL)
-    whenever(dummyTask.execute(argThat { getRefId() != "2a1" })) doReturn TaskResult.SUCCEEDED
+    whenever(dummyTask.execute(argThat { refId == "2a1" })) doReturn TaskResult(TERMINAL)
+    whenever(dummyTask.execute(argThat { refId != "2a1" })) doReturn TaskResult.SUCCEEDED
 
     context.runToCompletion(pipeline, runner::start, repository)
 
-    repository.retrievePipeline(pipeline.id).apply {
+    repository.retrieve(PIPELINE, pipeline.id).apply {
       status shouldEqual SUCCEEDED
       stageByRef("1").status shouldEqual SUCCEEDED
       stageByRef("2a1").status shouldEqual FAILED_CONTINUE
@@ -335,7 +343,8 @@ open class QueueIntegrationTest {
     }
   }
 
-  @Test fun `stages set to allow failure but fail the pipeline will run to completion but then mark the pipeline failed`() {
+  @Test
+  fun `stages set to allow failure but fail the pipeline will run to completion but then mark the pipeline failed`() {
     val pipeline = pipeline {
       application = "spinnaker"
       stage {
@@ -374,12 +383,12 @@ open class QueueIntegrationTest {
     repository.store(pipeline)
 
     whenever(dummyTask.timeout) doReturn 2000L
-    whenever(dummyTask.execute(argThat { getRefId() == "2a1" })) doReturn TaskResult(TERMINAL)
-    whenever(dummyTask.execute(argThat { getRefId() != "2a1" })) doReturn TaskResult.SUCCEEDED
+    whenever(dummyTask.execute(argThat { refId == "2a1" })) doReturn TaskResult(TERMINAL)
+    whenever(dummyTask.execute(argThat { refId != "2a1" })) doReturn TaskResult.SUCCEEDED
 
     context.runToCompletion(pipeline, runner::start, repository)
 
-    repository.retrievePipeline(pipeline.id).apply {
+    repository.retrieve(PIPELINE, pipeline.id).apply {
       status shouldEqual TERMINAL
       stageByRef("1").status shouldEqual SUCCEEDED
       stageByRef("2a1").status shouldEqual STOPPED
@@ -390,7 +399,8 @@ open class QueueIntegrationTest {
     }
   }
 
-  @Test fun `can run a stage with an execution window`() {
+  @Test
+  fun `can run a stage with an execution window`() {
     val pipeline = pipeline {
       application = "spinnaker"
       stage {
@@ -417,7 +427,7 @@ open class QueueIntegrationTest {
 
     context.runToCompletion(pipeline, runner::start, repository)
 
-    repository.retrievePipeline(pipeline.id).apply {
+    repository.retrieve(PIPELINE, pipeline.id).apply {
       status shouldEqual SUCCEEDED
       stages.size shouldEqual 2
       stages.first().type shouldEqual RestrictExecutionDuringTimeWindow.TYPE
@@ -453,7 +463,7 @@ open class QueueIntegrationTest {
 
     context.runToCompletion(pipeline, runner::start, repository)
 
-    repository.retrievePipeline(pipeline.id).apply {
+    repository.retrieve(PIPELINE, pipeline.id).apply {
       status shouldEqual SUCCEEDED
       stages.size shouldEqual 5
       stages.first().type shouldEqual RestrictExecutionDuringTimeWindow.TYPE
@@ -464,7 +474,8 @@ open class QueueIntegrationTest {
   }
 
   // TODO: this test is verifying a bunch of things at once, it would make sense to break it up
-  @Test fun `can resolve expressions in stage contexts`() {
+  @Test
+  fun `can resolve expressions in stage contexts`() {
     val pipeline = pipeline {
       application = "spinnaker"
       context["global"] = "foo"
@@ -489,11 +500,11 @@ open class QueueIntegrationTest {
 
     verify(dummyTask).execute(check {
       // expressions should be resolved in the stage passes to tasks
-      it.getContext()["expr"] shouldEqual true
-      (it.getContext()["key"] as Map<String, Any>)["expr"] shouldEqual true
+      it.context["expr"] shouldEqual true
+      (it.context["key"] as Map<String, Any>)["expr"] shouldEqual true
     })
 
-    repository.retrievePipeline(pipeline.id).apply {
+    repository.retrieve(PIPELINE, pipeline.id).apply {
       status shouldEqual SUCCEEDED
       // resolved expressions should be persisted
       stages.first().context["expr"] shouldEqual true
@@ -501,7 +512,8 @@ open class QueueIntegrationTest {
     }
   }
 
-  @Test fun `a restarted branch will not stall due to original cancellation`() {
+  @Test
+  fun `a restarted branch will not stall due to original cancellation`() {
     val pipeline = pipeline {
       application = "spinnaker"
       stage {
@@ -535,14 +547,15 @@ open class QueueIntegrationTest {
 
     context.restartAndRunToCompletion(pipeline.stageByRef("1"), runner::restart, repository)
 
-    repository.retrievePipeline(pipeline.id).apply {
+    repository.retrieve(PIPELINE, pipeline.id).apply {
       status shouldEqual CANCELED
       stageByRef("1").status shouldEqual SUCCEEDED
       stageByRef("2").status shouldEqual CANCELED
     }
   }
 
-  @Test fun `conditional stages can depend on global context values`() {
+  @Test
+  fun `conditional stages can depend on outputs of previous stages`() {
     val pipeline = pipeline {
       application = "spinnaker"
       stage {
@@ -553,34 +566,36 @@ open class QueueIntegrationTest {
         refId = "2a"
         requisiteStageRefIds = setOf("1")
         type = "dummy"
-        context = mapOf(
-          "stageEnabled" to mapOf(
-            "type" to "expression",
-            "expression" to "\${foo == true}"
-          )
+        context["stageEnabled"] = mapOf(
+          "type" to "expression",
+          "expression" to "\${foo == true}"
         )
       }
       stage {
         refId = "2b"
         requisiteStageRefIds = setOf("1")
         type = "dummy"
-        context = mapOf(
-          "stageEnabled" to mapOf(
-            "type" to "expression",
-            "expression" to "\${foo == false}"
-          )
+        context["stageEnabled"] = mapOf(
+          "type" to "expression",
+          "expression" to "\${foo == false}"
         )
       }
     }
     repository.store(pipeline)
-    repository.storeExecutionContext(pipeline.id, mapOf("foo" to false))
 
     whenever(dummyTask.timeout) doReturn 2000L
-    whenever(dummyTask.execute(any())) doReturn TaskResult.SUCCEEDED
+    whenever(dummyTask.execute(any())) doAnswer {
+      val stage = it.arguments.first() as Stage
+      if (stage.refId == "1") {
+        TaskResult(SUCCEEDED, emptyMap<String, Any?>(), mapOf("foo" to false))
+      } else {
+        TaskResult.SUCCEEDED
+      }
+    }
 
     context.runToCompletion(pipeline, runner::start, repository)
 
-    repository.retrievePipeline(pipeline.id).apply {
+    repository.retrieve(PIPELINE, pipeline.id).apply {
       status shouldEqual SUCCEEDED
       stageByRef("1").status shouldEqual SUCCEEDED
       stageByRef("2a").status shouldEqual SKIPPED
@@ -588,7 +603,8 @@ open class QueueIntegrationTest {
     }
   }
 
-  @Test fun `conditional stages can depend on global context values after restart`() {
+  @Test
+  fun `conditional stages can depend on global context values after restart`() {
     val pipeline = pipeline {
       application = "spinnaker"
       stage {
@@ -623,14 +639,20 @@ open class QueueIntegrationTest {
       status = TERMINAL
     }
     repository.store(pipeline)
-    repository.storeExecutionContext(pipeline.id, mapOf("foo" to false))
 
     whenever(dummyTask.timeout) doReturn 2000L
-    whenever(dummyTask.execute(any())) doReturn TaskResult.SUCCEEDED
+    whenever(dummyTask.execute(any())) doAnswer {
+      val stage = it.arguments.first() as Stage
+      if (stage.refId == "1") {
+        TaskResult(SUCCEEDED, emptyMap<String, Any?>(), mapOf("foo" to false))
+      } else {
+        TaskResult.SUCCEEDED
+      }
+    }
 
     context.restartAndRunToCompletion(pipeline.stageByRef("1"), runner::restart, repository)
 
-    repository.retrievePipeline(pipeline.id).apply {
+    repository.retrieve(PIPELINE, pipeline.id).apply {
       status shouldEqual SUCCEEDED
       stageByRef("2a").status shouldEqual SKIPPED
       stageByRef("2b").status shouldEqual SUCCEEDED
@@ -656,7 +678,7 @@ open class TestConfig {
   }
 
   @Bean open fun dummyStage() = object : StageDefinitionBuilder {
-    override fun <T : Execution<T>> taskGraph(stage: Stage<T>, builder: Builder) {
+    override fun taskGraph(stage: Stage, builder: Builder) {
       builder.withTask("dummy", DummyTask::class.java)
     }
 
@@ -664,7 +686,7 @@ open class TestConfig {
   }
 
   @Bean open fun parallelStage() = object : StageDefinitionBuilder {
-    override fun <T : Execution<T>> parallelStages(stage: Stage<T>) =
+    override fun parallelStages(stage: Stage) =
       listOf("us-east-1", "us-west-2", "eu-west-1").map { region ->
         newStage(stage.execution, "dummy", "dummy $region", stage.context + mapOf("region" to region), stage, STAGE_BEFORE)
       }

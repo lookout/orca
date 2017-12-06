@@ -16,12 +16,16 @@
 
 package com.netflix.spinnaker.orca.q.handler
 
+import com.natpryce.hamkrest.and
+import com.natpryce.hamkrest.has
+import com.natpryce.hamkrest.hasElement
+import com.natpryce.hamkrest.should.shouldMatch
 import com.netflix.spectator.api.NoopRegistry
 import com.netflix.spinnaker.orca.ExecutionStatus.*
 import com.netflix.spinnaker.orca.TaskResult
 import com.netflix.spinnaker.orca.exceptions.ExceptionHandler
+import com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType.PIPELINE
 import com.netflix.spinnaker.orca.pipeline.model.Execution.PausedDetails
-import com.netflix.spinnaker.orca.pipeline.model.Pipeline
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository
 import com.netflix.spinnaker.orca.pipeline.util.ContextParameterProcessor
@@ -81,14 +85,14 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
           }
         }
       }
-      val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+      val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
       and("has no context updates outputs") {
         val taskResult = TaskResult(SUCCEEDED)
 
         beforeGroup {
-          whenever(task.execute(any<Stage<*>>())) doReturn taskResult
-          whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+          whenever(task.execute(any<Stage>())) doReturn taskResult
+          whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
         }
 
         afterGroup(::resetMocks)
@@ -118,8 +122,8 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
         val taskResult = TaskResult(SUCCEEDED, stageOutputs, emptyMap<String, Any>())
 
         beforeGroup {
-          whenever(task.execute(any<Stage<*>>())) doReturn taskResult
-          whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+          whenever(task.execute(any<Stage>())) doReturn taskResult
+          whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
         }
 
         afterGroup(::resetMocks)
@@ -130,7 +134,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
 
         it("updates the stage context") {
           verify(repository).storeStage(check {
-            stageOutputs shouldEqual it.getContext()
+            stageOutputs shouldEqual it.context
           })
         }
 
@@ -140,12 +144,12 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
       }
 
       and("has outputs") {
-        val globalOutputs = mapOf("foo" to "covfefe")
-        val taskResult = TaskResult(SUCCEEDED, emptyMap<String, Any>(), globalOutputs)
+        val outputs = mapOf("foo" to "covfefe")
+        val taskResult = TaskResult(SUCCEEDED, emptyMap<String, Any>(), outputs)
 
         beforeGroup {
-          whenever(task.execute(any<Stage<*>>())) doReturn taskResult
-          whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+          whenever(task.execute(any<Stage>())) doReturn taskResult
+          whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
         }
 
         afterGroup(::resetMocks)
@@ -154,11 +158,45 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
           subject.handle(message)
         }
 
-        it("updates the stage outputs and global context") {
+        it("updates the stage outputs") {
           verify(repository).storeStage(check {
-            it.getOutputs() shouldEqual globalOutputs
+            it.outputs shouldEqual outputs
           })
-          verify(repository).storeExecutionContext(pipeline.id, globalOutputs)
+        }
+
+        it("also updates global context") {
+          verify(repository).storeExecutionContext(pipeline.id, outputs)
+        }
+      }
+
+      and("outputs a stageTimeoutMs value") {
+        val outputs = mapOf(
+          "foo" to "covfefe",
+          "stageTimeoutMs" to Long.MAX_VALUE
+        )
+        val taskResult = TaskResult(SUCCEEDED, emptyMap<String, Any>(), outputs)
+
+        beforeGroup {
+          whenever(task.execute(any<Stage>())) doReturn taskResult
+          whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
+        }
+
+        afterGroup(::resetMocks)
+
+        action("the handler receives a message") {
+          subject.handle(message)
+        }
+
+        it("does not write stageTimeoutMs to outputs") {
+          verify(repository).storeStage(check {
+            it.outputs shouldMatch has(Map<String, Any>::keys, hasElement("foo") and !hasElement("stageTimeoutMs"))
+          })
+        }
+
+        it("does not write stageTimeoutMs to global context") {
+          verify(repository).storeExecutionContext(eq(pipeline.id), check {
+            it shouldMatch has(Map<String, Any>::keys, hasElement("foo") and !hasElement("stageTimeoutMs"))
+          })
         }
       }
     }
@@ -173,14 +211,14 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
           }
         }
       }
-      val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+      val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
       val taskResult = TaskResult(RUNNING)
       val taskBackoffMs = 30_000L
 
       beforeGroup {
         whenever(task.execute(any())) doReturn taskResult
         whenever(task.getDynamicBackoffPeriod(any())) doReturn taskBackoffMs
-        whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+        whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
       }
 
       afterGroup(::resetMocks)
@@ -206,13 +244,13 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
             }
           }
         }
-        val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+        val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
         val taskResult = TaskResult(taskStatus)
 
         and("no overrides are in place") {
           beforeGroup {
             whenever(task.execute(any())) doReturn taskResult
-            whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+            whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
           }
 
           afterGroup(::resetMocks)
@@ -236,7 +274,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
             }
 
             whenever(task.execute(any())) doReturn taskResult
-            whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+            whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
           }
 
           afterGroup(::resetMocks)
@@ -261,7 +299,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
             }
 
             whenever(task.execute(any())) doReturn taskResult
-            whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+            whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
           }
 
           afterGroup(::resetMocks)
@@ -291,7 +329,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
           }
         }
       }
-      val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+      val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
       and("it is not recoverable") {
         val exceptionDetails = ExceptionHandler.Response(
@@ -304,7 +342,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
         and("the task should fail the pipeline") {
           beforeGroup {
             whenever(task.execute(any())) doThrow RuntimeException("o noes")
-            whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+            whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
             whenever(exceptionHandler.handles(any())) doReturn true
             whenever(exceptionHandler.handle(anyOrNull(), any())) doReturn exceptionDetails
           }
@@ -323,7 +361,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
 
           it("attaches the exception to the stage context") {
             verify(repository).storeStage(check {
-              it.getContext()["exception"] shouldEqual exceptionDetails
+              it.context["exception"] shouldEqual exceptionDetails
             })
           }
         }
@@ -336,7 +374,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
             }
 
             whenever(task.execute(any())) doThrow RuntimeException("o noes")
-            whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+            whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
             whenever(exceptionHandler.handles(any())) doReturn true
             whenever(exceptionHandler.handle(anyOrNull(), any())) doReturn exceptionDetails
           }
@@ -363,7 +401,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
             }
 
             whenever(task.execute(any())) doThrow RuntimeException("o noes")
-            whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+            whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
             whenever(exceptionHandler.handles(any())) doReturn true
             whenever(exceptionHandler.handle(anyOrNull(), any())) doReturn exceptionDetails
           }
@@ -395,7 +433,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
         beforeGroup {
           whenever(task.getDynamicBackoffPeriod(any())) doReturn taskBackoffMs
           whenever(task.execute(any())) doThrow RuntimeException("o noes")
-          whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+          whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
           whenever(exceptionHandler.handles(any())) doReturn true
           whenever(exceptionHandler.handle(anyOrNull(), any())) doReturn exceptionDetails
         }
@@ -423,10 +461,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
           }
         }
       }
-      val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+      val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
       beforeGroup {
-        whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+        whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
       }
 
       afterGroup(::resetMocks)
@@ -463,10 +501,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
           }
         }
       }
-      val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+      val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
       beforeGroup {
-        whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+        whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
       }
 
       afterGroup(::resetMocks)
@@ -503,10 +541,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
           }
         }
       }
-      val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+      val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
       beforeGroup {
-        whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+        whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
       }
 
       afterGroup(::resetMocks)
@@ -537,10 +575,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
             }
           }
         }
-        val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+        val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
         beforeGroup {
-          whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+          whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
           whenever(task.timeout) doReturn timeout.toMillis()
         }
 
@@ -573,10 +611,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
             context["continuePipeline"] = true
           }
         }
-        val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+        val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
         beforeGroup {
-          whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+          whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
           whenever(task.timeout) doReturn timeout.toMillis()
         }
 
@@ -597,7 +635,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
         val pipeline = pipeline {
           stage {
             type = "whatever"
-            context = hashMapOf("markSuccessfulOnTimeout" to true) as Map<String, Any>
+            context = hashMapOf<String, Any>("markSuccessfulOnTimeout" to true)
             task {
               id = "1"
               status = RUNNING
@@ -605,10 +643,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
             }
           }
         }
-        val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+        val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
         beforeGroup {
-          whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+          whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
           whenever(task.timeout) doReturn timeout.toMillis()
         }
 
@@ -643,10 +681,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
             }
           }
         }
-        val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+        val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
         beforeGroup {
-          whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+          whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
           whenever(task.timeout) doReturn timeout.toMillis()
         }
 
@@ -677,10 +715,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
             }
           }
         }
-        val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+        val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
         beforeGroup {
-          whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+          whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
           whenever(task.timeout) doReturn timeout.toMillis()
         }
 
@@ -715,10 +753,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
             }
           }
         }
-        val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+        val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
         beforeGroup {
-          whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+          whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
           whenever(task.timeout) doReturn timeout.toMillis()
         }
 
@@ -758,10 +796,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
                 }
               }
             }
-            val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+            val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
             beforeGroup {
-              whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+              whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
               whenever(task.timeout) doReturn timeout.toMillis()
             }
 
@@ -791,10 +829,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
                   }
                 }
               }
-              val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+              val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
               beforeGroup {
-                whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+                whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
                 whenever(task.timeout) doReturn timeout.toMillis()
               }
 
@@ -830,10 +868,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
                   }
                 }
               }
-              val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+              val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
               beforeGroup {
-                whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+                whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
                 whenever(task.timeout) doReturn timeout.toMillis()
               }
 
@@ -865,10 +903,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
                   }
                 }
               }
-              val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+              val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
               beforeGroup {
-                whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+                whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
                 whenever(task.timeout) doReturn timeout.toMillis()
               }
 
@@ -904,10 +942,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
                   }
                 }
               }
-              val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+              val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
 
               beforeGroup {
-                whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+                whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
                 whenever(task.timeout) doReturn timeout.toMillis()
               }
 
@@ -941,10 +979,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
                 }
               }
             }
-            val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTimeoutOverrideTask::class.java)
+            val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTimeoutOverrideTask::class.java)
 
             beforeGroup {
-              whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+              whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
               whenever(timeoutOverrideTask.timeout) doReturn timeout.toMillis()
             }
 
@@ -984,11 +1022,11 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
             }
           }
         }
-        val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stageByRef("1").id, "1", DummyTask::class.java)
+        val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stageByRef("1").id, "1", DummyTask::class.java)
 
         beforeGroup {
           whenever(task.execute(any())) doReturn TaskResult.SUCCEEDED
-          whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+          whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
         }
 
         afterGroup(::resetMocks)
@@ -999,7 +1037,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
 
         it("parses the expression") {
           verify(task).execute(check {
-            it.getContext()["expr"] shouldEqual expected
+            it.context["expr"] shouldEqual expected
           })
         }
       }
@@ -1032,11 +1070,11 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
           }
         }
       }
-      val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stageByRef("2").id, "1", DummyTask::class.java)
+      val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stageByRef("2").id, "1", DummyTask::class.java)
 
       beforeGroup {
         whenever(task.execute(any())) doReturn TaskResult.SUCCEEDED
-        whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+        whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
       }
 
       afterGroup(::resetMocks)
@@ -1047,7 +1085,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
 
       it("resolves deployed server groups") {
         verify(task).execute(check {
-          it.getContext()["command"] shouldEqual "serverGroupDetails.groovy mgmttest us-west-1 spindemo-test-v008"
+          it.context["command"] shouldEqual "serverGroupDetails.groovy mgmttest us-west-1 spindemo-test-v008"
         })
       }
     }
@@ -1069,11 +1107,11 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
           }
         }
       }
-      val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stageByRef("1").id, "1", DummyTask::class.java)
+      val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stageByRef("1").id, "1", DummyTask::class.java)
 
       beforeGroup {
         whenever(task.execute(any())) doReturn TaskResult.SUCCEEDED
-        whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+        whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
       }
 
       afterGroup(::resetMocks)
@@ -1084,16 +1122,20 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
 
       it("does not overwrite the stage's parameters with the pipeline's") {
         verify(task).execute(check {
-          it.getContext()["parameters"] shouldEqual mapOf("message" to "o hai")
+          it.context["parameters"] shouldEqual mapOf("message" to "o hai")
         })
       }
     }
 
-    given("an expression in the context that refers to a global context value") {
+    given("an expression in the context that refers to a prior stage output") {
       val pipeline = pipeline {
-        context["foo"] = "bar"
         stage {
           refId = "1"
+          outputs["foo"] = "bar"
+        }
+        stage {
+          refId = "2"
+          requisiteStageRefIds = setOf("1")
           context["expression"] = "\${foo}"
           type = "whatever"
           task {
@@ -1102,11 +1144,11 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
           }
         }
       }
-      val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stageByRef("1").id, "1", DummyTask::class.java)
+      val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stageByRef("2").id, "1", DummyTask::class.java)
 
       beforeGroup {
         whenever(task.execute(any())) doReturn TaskResult.SUCCEEDED
-        whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+        whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
       }
 
       afterGroup(::resetMocks)
@@ -1117,7 +1159,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
 
       it("passes the decoded expression to the task") {
         verify(task).execute(check {
-          it.getContext()["expression"] shouldEqual "bar"
+          it.context["expression"] shouldEqual "bar"
         })
       }
     }
@@ -1133,10 +1175,10 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
         }
       }
     }
-    val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", InvalidTask::class.java)
+    val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", InvalidTask::class.java)
 
     beforeGroup {
-      whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+      whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
     }
 
     afterGroup(::resetMocks)
@@ -1167,13 +1209,13 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
         }
       }
     }
-    val message = RunTask(Pipeline::class.java, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
+    val message = RunTask(pipeline.type, pipeline.id, "foo", pipeline.stages.first().id, "1", DummyTask::class.java)
     message.setAttribute(TotalThrottleTimeAttribute(5000L))
     val taskResult = TaskResult(RUNNING)
 
     beforeGroup {
-      whenever(task.execute(any<Stage<*>>())) doReturn taskResult
-      whenever(repository.retrievePipeline(message.executionId)) doReturn pipeline
+      whenever(task.execute(any<Stage>())) doReturn taskResult
+      whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
       whenever(task.timeout) doReturn timeout.toMillis()
     }
 

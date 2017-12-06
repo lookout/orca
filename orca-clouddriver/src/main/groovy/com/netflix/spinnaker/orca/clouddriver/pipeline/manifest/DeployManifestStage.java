@@ -20,9 +20,9 @@ package com.netflix.spinnaker.orca.clouddriver.pipeline.manifest;
 import com.netflix.spinnaker.orca.clouddriver.tasks.MonitorKatoTask;
 import com.netflix.spinnaker.orca.clouddriver.tasks.manifest.DeployManifestTask;
 import com.netflix.spinnaker.orca.clouddriver.tasks.manifest.ManifestForceCacheRefreshTask;
+import com.netflix.spinnaker.orca.clouddriver.tasks.manifest.WaitForManifestStableTask;
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder;
 import com.netflix.spinnaker.orca.pipeline.TaskNode;
-import com.netflix.spinnaker.orca.pipeline.model.Execution;
 import com.netflix.spinnaker.orca.pipeline.model.Stage;
 import org.springframework.stereotype.Component;
 
@@ -31,9 +31,10 @@ public class DeployManifestStage implements StageDefinitionBuilder {
   public static final String PIPELINE_CONFIG_TYPE = "deployManifest";
 
   @Override
-  public <T extends Execution<T>> void taskGraph(Stage<T> stage, TaskNode.Builder builder) {
+  public void taskGraph(Stage stage, TaskNode.Builder builder) {
     builder.withTask(DeployManifestTask.TASK_NAME, DeployManifestTask.class)
         .withTask("monitorDeploy", MonitorKatoTask.class)
-        .withTask(ManifestForceCacheRefreshTask.TASK_NAME, ManifestForceCacheRefreshTask.class);
+        .withTask(ManifestForceCacheRefreshTask.TASK_NAME, ManifestForceCacheRefreshTask.class)
+        .withTask(WaitForManifestStableTask.TASK_NAME, WaitForManifestStableTask.class);
   }
 }

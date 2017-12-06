@@ -36,6 +36,7 @@ import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.render.filters.Frigg
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.render.filters.JsonFilter;
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.render.tags.ModuleTag;
 import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.render.tags.PipelineIdTag;
+import com.netflix.spinnaker.orca.pipelinetemplate.v1schema.render.tags.StrategyIdTag;
 import com.netflix.spinnaker.orca.pipelinetemplate.validator.Errors;
 import com.netflix.spinnaker.orca.pipelinetemplate.validator.Errors.Error;
 import com.netflix.spinnaker.orca.pipelinetemplate.validator.Errors.Severity;
@@ -65,12 +66,18 @@ public class JinjaRenderer implements Renderer {
   }
 
   public JinjaRenderer(RenderedValueConverter renderedValueConverter, ObjectMapper pipelineTemplateObjectMapper, Front50Service front50Service, List<Tag> jinjaTags) {
+    if (front50Service == null) {
+      log.error("Pipeline templates require front50 to enabled. Set 'front50.enabled: true' in your orca config.");
+      return;
+    }
+
     this.renderedValueConverter = renderedValueConverter;
 
     jinja = new Jinjava(buildJinjavaConfig());
     jinja.setResourceLocator(new NoopResourceLocator());
     jinja.getGlobalContext().registerTag(new ModuleTag(this, pipelineTemplateObjectMapper));
     jinja.getGlobalContext().registerTag(new PipelineIdTag(front50Service));
+    jinja.getGlobalContext().registerTag(new StrategyIdTag(front50Service));
     if (jinjaTags != null) {
       jinjaTags.forEach(tag -> jinja.getGlobalContext().registerTag(tag));
     }

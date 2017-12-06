@@ -25,22 +25,19 @@ import com.netflix.spinnaker.orca.igor.tasks.StartJenkinsJobTask
 import com.netflix.spinnaker.orca.igor.tasks.StopJenkinsJobTask
 import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
 import com.netflix.spinnaker.orca.pipeline.TaskNode
-import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import com.netflix.spinnaker.orca.pipeline.model.Task
-import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Component
 
 @Slf4j
 @Component
-@CompileStatic
-class JenkinsStage implements StageDefinitionBuilder, RestartableStage, CancellableStage {
+public class JenkinsStage implements StageDefinitionBuilder, RestartableStage, CancellableStage {
   @Autowired StopJenkinsJobTask stopJenkinsJobTask
 
   @Override
-  <T extends Execution<T>> void taskGraph(Stage<T> stage, TaskNode.Builder builder) {
+  void taskGraph(Stage stage, TaskNode.Builder builder) {
     builder
       .withTask("start${getType().capitalize()}Job", StartJenkinsJobTask.class)
       .withTask("waitFor${getType().capitalize()}JobStart", MonitorQueuedJenkinsJobTask.class)

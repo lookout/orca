@@ -75,6 +75,7 @@ public class RenderTransform implements PipelineTemplateVisitor {
 
     // We don't care about configuration partials, they were already merged into the template at this point
     renderPartials(template.getPartials(), filterStages(template.getStages(), true), context);
+    renderPartials(template.getPartials(), filterStages(templateConfiguration.getStages(), true), context);
 
     renderConfigurations(template.getConfiguration().getParameters(), context, "template:configuration.parameters");
     renderConfigurations(templateConfiguration.getConfiguration().getParameters(), context, "configuration:configuration.parameters");
@@ -127,12 +128,14 @@ public class RenderTransform implements PipelineTemplateVisitor {
 
     stage.setName(renderStageProperty(stage.getName(), context, getStagePropertyLocation(locationNamespace, stage.getId(), "name")));
     stage.setComments(renderStageProperty(stage.getComments(), context, getStagePropertyLocation(locationNamespace, stage.getId(), "comments")));
-    stage.setWhen(
-      stage.getWhen()
-        .stream()
-        .map(w -> renderStageProperty(w, context, getStagePropertyLocation(locationNamespace, stage.getId(), "when")))
-        .collect(Collectors.toList())
-    );
+    if (stage.getWhen() != null) {
+      stage.setWhen(
+        stage.getWhen()
+          .stream()
+          .map(w -> renderStageProperty(w, context, getStagePropertyLocation(locationNamespace, stage.getId(), "when")))
+          .collect(Collectors.toList())
+      );
+    }
   }
 
   private String renderStageProperty(String input, RenderContext context, String location) {

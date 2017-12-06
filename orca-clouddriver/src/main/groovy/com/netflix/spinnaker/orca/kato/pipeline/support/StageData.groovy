@@ -18,6 +18,7 @@ package com.netflix.spinnaker.orca.kato.pipeline.support
 
 import com.netflix.frigga.autoscaling.AutoScalingGroupNameBuilder
 import com.netflix.spinnaker.moniker.Moniker
+import org.apache.commons.lang3.StringUtils
 
 class StageData {
   String strategy
@@ -40,13 +41,14 @@ class StageData {
 
   @Deprecated
   long delayBeforeDisableSec
+  long delayBeforeScaleDownSec
 
   long delayBeforeCleanup
   PipelineBeforeCleanup pipelineBeforeCleanup
 
   String getCluster() {
     if (moniker?.cluster) {
-      return moniker.cluster
+      return StringUtils.stripEnd(moniker.cluster, "-")
     } else {
       def builder = new AutoScalingGroupNameBuilder()
       builder.appName = application
@@ -65,6 +67,10 @@ class StageData {
 
   long getDelayBeforeCleanup() {
     return this.delayBeforeCleanup ?: this.delayBeforeDisableSec
+  }
+
+  long getDelayBeforeScaleDown() {
+    return this.delayBeforeScaleDownSec
   }
 
   @Deprecated

@@ -35,17 +35,23 @@ class WaitTask implements RetryableTask {
 
   @Override
   TaskResult execute(Stage stage) {
+    if (stage.context.waitTime == null) {
+      return new TaskResult(SUCCEEDED)
+    }
     // wait time is specified in seconds
     long waitTime = stage.context.waitTime as long
     def waitTimeMs = TimeUnit.MILLISECONDS.convert(waitTime, TimeUnit.SECONDS)
     def now = timeProvider.millis
 
-    if (!stage.context.containsKey("waitTaskState") || !stage.context.waitTaskState instanceof Map) {
+
+    def waitTaskState = stage.context.waitTaskState
+    if (!waitTaskState || !waitTaskState instanceof Map) {
       new TaskResult(RUNNING, [waitTaskState: [startTime: now]])
     } else if (now - ((Long) ((Map) stage.context.waitTaskState).startTime) > waitTimeMs) {
-      new TaskResult(SUCCEEDED)
+      new TaskResult(SUCCEEDED, [waitTaskState: [:]])
     } else if (stage.context.skipRemainingWait) {
-      new TaskResult(SUCCEEDED)
+      // leaving skipRemainingWait unchanged since added to context elsewhere
+      new TaskResult(SUCCEEDED, [waitTaskState: [:]])
     } else {
       new TaskResult(RUNNING)
     }

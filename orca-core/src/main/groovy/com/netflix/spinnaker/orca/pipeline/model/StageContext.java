@@ -16,23 +16,31 @@
 
 package com.netflix.spinnaker.orca.pipeline.model;
 
-import com.google.common.collect.ForwardingMap;
-
-import javax.annotation.Nullable;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.stream.Collectors;
+import javax.annotation.Nullable;
+import com.google.common.collect.ForwardingMap;
+import static com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType.PIPELINE;
+import static java.util.stream.Collectors.toList;
 
 public class StageContext extends ForwardingMap<String, Object> {
 
-  private final Stage<?> stage;
-  private final Map<String, Object> delegate = new HashMap<>();
+  private final Stage stage;
+  private final Map<String, Object> delegate;
 
-  public StageContext(Stage<?> stage) {
+  public StageContext(Stage stage) {
+    this(stage, new HashMap<>());
+  }
+
+  public StageContext(StageContext stageContext) {
+    this(stageContext.stage, new HashMap<>(stageContext.delegate));
+  }
+
+  public StageContext(Stage stage, Map<String, Object> delegate) {
     this.stage = stage;
+    this.delegate = delegate;
   }
 
   @Override protected Map<String, Object> delegate() {
@@ -41,8 +49,8 @@ public class StageContext extends ForwardingMap<String, Object> {
 
   private Map<String, Object> getTrigger() {
     Execution execution = stage.getExecution();
-    if (execution instanceof Pipeline) {
-      return ((Pipeline) execution).getTrigger();
+    if (execution.getType() == PIPELINE) {
+      return execution.getTrigger();
     } else {
       return Collections.emptyMap();
     }
@@ -58,12 +66,7 @@ public class StageContext extends ForwardingMap<String, Object> {
         .filter(it -> it.getOutputs().containsKey(key))
         .findFirst()
         .map(it -> it.getOutputs().get(key))
-        .orElseGet(() ->
-          Optional
-            .ofNullable(stage.getExecution())
-            .map(execution -> execution.getContext().get(key))
-            .orElse(getTrigger().get(key))
-        );
+        .orElse(null);
     }
   }
 
@@ -73,11 +76,11 @@ public class StageContext extends ForwardingMap<String, Object> {
    */
   public List<Object> getAll(Object key) {
     List<Object> result = stage
-        .ancestors()
-        .stream()
-        .filter(it -> it.getOutputs().containsKey(key))
-        .map(it -> it.getOutputs().get(key))
-        .collect(Collectors.toList());
+      .ancestors()
+      .stream()
+      .filter(it -> it.getOutputs().containsKey(key))
+      .map(it -> it.getOutputs().get(key))
+      .collect(toList());
 
     if (delegate.containsKey(key)) {
       result.add(0, delegate.get(key));
@@ -85,7 +88,7 @@ public class StageContext extends ForwardingMap<String, Object> {
 
     Map<String, Object> trigger = getTrigger();
     if (trigger.containsKey(key)) {
-      result.add(key);
+      result.add(trigger.get(key));
     }
 
     return result;

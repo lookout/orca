@@ -16,20 +16,18 @@
 
 package com.netflix.spinnaker.orca.kayenta.pipeline
 
-import com.netflix.spinnaker.orca.kayenta.tasks.AggregateCanaryResultsTask
-import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
-import com.netflix.spinnaker.orca.pipeline.TaskNode
-import com.netflix.spinnaker.orca.pipeline.WaitStage
-import com.netflix.spinnaker.orca.pipeline.model.Execution
-import com.netflix.spinnaker.orca.pipeline.model.Stage
-import com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner
-import org.springframework.beans.factory.annotation.Autowired
-import org.springframework.stereotype.Component
-
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.temporal.ChronoUnit
+import com.netflix.spinnaker.orca.kayenta.tasks.AggregateCanaryResultsTask
+import com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder
+import com.netflix.spinnaker.orca.pipeline.TaskNode
+import com.netflix.spinnaker.orca.pipeline.WaitStage
+import com.netflix.spinnaker.orca.pipeline.model.Stage
+import com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner
+import org.springframework.beans.factory.annotation.Autowired
+import org.springframework.stereotype.Component
 
 @Component
 class KayentaCanaryStage implements StageDefinitionBuilder {
@@ -41,19 +39,21 @@ class KayentaCanaryStage implements StageDefinitionBuilder {
   WaitStage waitStage
 
   @Override
-  def <T extends Execution<T>> void taskGraph(Stage<T> stage, TaskNode.Builder builder) {
+  def void taskGraph(Stage stage, TaskNode.Builder builder) {
     builder.withTask("aggregateCanaryResults", AggregateCanaryResultsTask)
   }
 
   @Override
-  def <T extends Execution<T>> List<Stage<T>> aroundStages(Stage<T> stage) {
+  def List<Stage> aroundStages(Stage stage) {
     Map<String, Object> context = stage.getContext()
     Map<String, Object> canaryConfig = context.canaryConfig
     String metricsAccountName = canaryConfig.metricsAccountName
     String storageAccountName = canaryConfig.storageAccountName
     String canaryConfigId = canaryConfig.canaryConfigId
     String controlScope = canaryConfig.controlScope
+    String controlRegion = canaryConfig.controlRegion
     String experimentScope = canaryConfig.experimentScope
+    String experimentRegion = canaryConfig.experimentRegion
     String startTimeIso = canaryConfig.startTimeIso ?: Instant.now(clock).toString()
     Instant startTimeInstant = Instant.parse(startTimeIso)
     String endTimeIso = canaryConfig.endTimeIso
@@ -108,7 +108,9 @@ class KayentaCanaryStage implements StageDefinitionBuilder {
         storageAccountName: storageAccountName,
         canaryConfigId: canaryConfigId,
         controlScope: controlScope,
+        controlRegion: controlRegion,
         experimentScope: experimentScope,
+        experimentRegion: experimentRegion,
         step: step,
         extendedScopeParams: extendedScopeParams,
         scoreThresholds: scoreThresholds

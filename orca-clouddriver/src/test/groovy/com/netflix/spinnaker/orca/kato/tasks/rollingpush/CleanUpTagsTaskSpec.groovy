@@ -6,7 +6,7 @@ import com.netflix.spinnaker.orca.clouddriver.OortService
 import com.netflix.spinnaker.orca.clouddriver.model.TaskId
 import com.netflix.spinnaker.orca.clouddriver.utils.MonikerHelper
 import com.netflix.spinnaker.orca.kato.pipeline.support.SourceResolver
-import com.netflix.spinnaker.orca.pipeline.model.Pipeline
+import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import retrofit.client.Response
 import retrofit.mime.TypedByteArray
@@ -16,7 +16,7 @@ class CleanUpTagsTaskSpec extends Specification {
   def "should create deleteEntityTags operations "() {
     given:
     def task = new CleanUpTagsTask()
-    def stage = new Stage<>(new Pipeline("orca"), "")
+    def stage = new Stage(Execution.newPipeline("orca"), "")
     stage.context = [
       application: "app",
       cloudProvider: "aws",
@@ -33,29 +33,36 @@ class CleanUpTagsTaskSpec extends Specification {
       [
         tags: [
           [
-            name: "tagName",
-            value: [
+            namespace: "astrid_rules",
+            name     : "tagName",
+            value    : [
               imageId: "imageId"
-            ]
+            ],
+            valueType: "object"
           ],
           [
-            name: "tagName2",
-            value: [
+            namespace: "astrid_rules",
+            name     : "tagName2",
+            value    : [
               imageId: "imageId1"
-            ]
+            ],
+            valueType: "object"
           ]
         ]
       ],
       [
         tags: [
           [
-            name: "tagName3",
-            value: [
+            namespace: "astrid_rules",
+            name     : "tagName3",
+            value    : [
               imageId: "imageId1"
-            ]
+            ],
+            valueType: "object"
           ],
           [
-            name: "tagName3"
+            namespace: "astrid_rules",
+            name     : "tagName3"
           ]
         ]
       ]

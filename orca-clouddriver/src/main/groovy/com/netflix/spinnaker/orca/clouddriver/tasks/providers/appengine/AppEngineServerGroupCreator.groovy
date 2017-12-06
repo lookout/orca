@@ -21,12 +21,12 @@ import com.netflix.spinnaker.kork.artifacts.model.Artifact
 import com.netflix.spinnaker.kork.artifacts.model.ExpectedArtifact
 import com.netflix.spinnaker.orca.clouddriver.tasks.servergroup.ServerGroupCreator
 import com.netflix.spinnaker.orca.pipeline.model.Execution
-import com.netflix.spinnaker.orca.pipeline.model.Pipeline
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import com.netflix.spinnaker.orca.pipeline.util.ArtifactResolver
 import groovy.util.logging.Slf4j
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Component
+import static com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType.PIPELINE
 
 @Slf4j
 @Component
@@ -64,16 +64,20 @@ class AppEngineServerGroupCreator implements ServerGroupCreator {
       return
     }
 
-    Map expectedArtifact = operation.expectedArtifact
+    String expectedArtifactId = operation.expectedArtifactId
+    Execution execution = stage.getExecution()
+
+    Map expectedArtifact = [:]
+    Map<String, Object> trigger = [:]
+    if (execution.type == PIPELINE) {
+      // TODO(jacobkiefer): Use stage context input/output lookup.
+      trigger = execution.getTrigger()
+      expectedArtifact = trigger.resolvedExpectedArtifacts.find { e -> e.id == expectedArtifactId } as Map
+    }
+
     // NOTE: expectedArtifact is a Map, and fragile to field changes in the underlying data structures.
     // If a field changes in the ExpectedArtifact model, change it here.
     if (operation.fromArtifact && expectedArtifact && expectedArtifact.matchArtifact) {
-      Execution execution = stage.getExecution()
-      Map<String, Object> trigger = [:]
-      if (execution instanceof Pipeline) {
-        trigger = ((Pipeline) execution).getTrigger()
-      }
-
       List<Map> artifacts = (List<Map>) trigger.artifacts
       def foundArtifact = artifacts.find { a ->
         ExpectedArtifact e = objectMapper.convertValue(expectedArtifact, ExpectedArtifact)

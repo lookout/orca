@@ -17,7 +17,7 @@
 package com.netflix.spinnaker.orca.kato.tasks
 
 import com.netflix.spinnaker.orca.ExecutionStatus
-import com.netflix.spinnaker.orca.pipeline.model.Pipeline
+import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import com.netflix.spinnaker.orca.pipeline.tasks.WaitTask
 import spock.lang.Specification
@@ -30,15 +30,16 @@ class WaitTaskSpec extends Specification {
   void "should wait for a configured period"() {
     setup:
       def wait = 5
-    def pipeline = new Pipeline("orca")
-      def stage = new Stage<>(pipeline, "wait", [waitTime: wait])
+    def pipeline = Execution.newPipeline("orca")
+      def stage = new Stage(pipeline, "wait", [waitTime: wait])
 
     when:
       def result = task.execute(stage)
 
     then:
       result.status == ExecutionStatus.RUNNING
-    stage.context.putAll(result.context)
+      result.context.waitTaskState.startTime > 1
+      stage.context.putAll(result.context)
 
     when:
       timeProvider.millis = System.currentTimeMillis() + 10000
@@ -48,13 +49,14 @@ class WaitTaskSpec extends Specification {
 
     then:
       result.status == ExecutionStatus.SUCCEEDED
+      result.context.waitTaskState.size() == 0
 
   }
 
   void "should skip waiting when marked in context"() {
     setup:
-    def pipeline = new Pipeline("orca")
-    def stage = new Stage<>(pipeline, "wait", [waitTime: 1000000])
+    def pipeline = Execution.newPipeline("orca")
+    def stage = new Stage(pipeline, "wait", [waitTime: 1000000])
 
     when:
     def result = task.execute(stage)

@@ -21,7 +21,6 @@ import com.netflix.spinnaker.orca.clouddriver.pipeline.cluster.ScaleDownClusterS
 import com.netflix.spinnaker.orca.clouddriver.pipeline.cluster.ShrinkClusterStage
 import com.netflix.spinnaker.orca.kato.pipeline.support.StageData
 import com.netflix.spinnaker.orca.pipeline.WaitStage
-import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner
 import org.springframework.beans.factory.annotation.Autowired
@@ -50,7 +49,7 @@ class RedBlackStrategy implements Strategy, ApplicationContextAware {
   ApplicationContext applicationContext
 
   @Override
-  <T extends Execution<T>> List<Stage<T>> composeFlow(Stage<T> stage) {
+  List<Stage> composeFlow(Stage stage) {
     def stages = []
     def stageData = stage.mapTo(StageData)
     def cleanupConfig = AbstractDeployStrategyStage.CleanupConfig.fromStage(stage)
@@ -90,7 +89,7 @@ class RedBlackStrategy implements Strategy, ApplicationContextAware {
       stages << newStage(
         stage.execution,
         waitStage.type,
-        "wait",
+        "Wait Before Disable",
         waitContext,
         stage,
         SyntheticStageOwner.STAGE_AFTER
@@ -111,6 +110,18 @@ class RedBlackStrategy implements Strategy, ApplicationContextAware {
     )
 
     if (stageData.scaleDown) {
+      if(stageData?.getDelayBeforeScaleDown()) {
+        def waitContext = [waitTime: stageData?.getDelayBeforeScaleDown()]
+        stages << newStage(
+          stage.execution,
+          waitStage.type,
+          "Wait Before Scale Down",
+          waitContext,
+          stage,
+          SyntheticStageOwner.STAGE_AFTER
+        )
+      }
+
       def scaleDown = baseContext + [
         allowScaleDownActive         : false,
         remainingFullSizeServerGroups: 1,

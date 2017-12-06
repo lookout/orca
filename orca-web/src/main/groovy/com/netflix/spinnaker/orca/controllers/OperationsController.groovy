@@ -16,8 +16,6 @@
 
 package com.netflix.spinnaker.orca.controllers
 
-import com.netflix.spinnaker.orca.pipeline.util.ArtifactResolver
-
 import javax.servlet.http.HttpServletResponse
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.netflix.spinnaker.kork.web.exceptions.InvalidRequestException
@@ -25,11 +23,12 @@ import com.netflix.spinnaker.kork.web.exceptions.ValidationException
 import com.netflix.spinnaker.orca.extensionpoint.pipeline.PipelinePreprocessor
 import com.netflix.spinnaker.orca.igor.BuildArtifactFilter
 import com.netflix.spinnaker.orca.igor.BuildService
-import com.netflix.spinnaker.orca.pipeline.OrchestrationLauncher
-import com.netflix.spinnaker.orca.pipeline.PipelineLauncher
-import com.netflix.spinnaker.orca.pipeline.model.Pipeline
+import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionNotFoundException
+import com.netflix.spinnaker.orca.pipeline.ExecutionLauncher
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository
+import com.netflix.spinnaker.orca.pipeline.util.ArtifactResolver
 import com.netflix.spinnaker.orca.pipeline.util.ContextParameterProcessor
+import com.netflix.spinnaker.orca.pipelinetemplate.PipelineTemplateService
 import com.netflix.spinnaker.orca.webhook.service.WebhookService
 import com.netflix.spinnaker.security.AuthenticatedRequest
 import groovy.util.logging.Slf4j
@@ -38,16 +37,15 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestMethod
 import org.springframework.web.bind.annotation.RestController
+import static com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType.ORCHESTRATION
+import static com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType.PIPELINE
 import static net.logstash.logback.argument.StructuredArguments.value
 
 @RestController
 @Slf4j
 class OperationsController {
   @Autowired
-  PipelineLauncher pipelineLauncher
-
-  @Autowired
-  OrchestrationLauncher orchestrationLauncher
+  ExecutionLauncher executionLauncher
 
   @Autowired(required = false)
   BuildService buildService
@@ -57,6 +55,9 @@ class OperationsController {
 
   @Autowired
   ExecutionRepository executionRepository
+
+  @Autowired(required = false)
+  PipelineTemplateService pipelineTemplateService
 
   @Autowired
   ContextParameterProcessor contextParameterProcessor
@@ -69,6 +70,9 @@ class OperationsController {
 
   @Autowired(required = false)
   WebhookService webhookService
+
+  @Autowired(required = false)
+  ArtifactResolver artifactResolver
 
   @RequestMapping(value = "/orchestrate", method = RequestMethod.POST)
   Map<String, Object> orchestrate(@RequestBody Map pipeline, HttpServletResponse response) {
@@ -115,6 +119,17 @@ class OperationsController {
   private void parsePipelineTrigger(ExecutionRepository executionRepository, BuildService buildService, Map pipeline) {
     if (!(pipeline.trigger instanceof Map)) {
       pipeline.trigger = [:]
+      if (pipeline.plan && pipeline.type == "templatedPipeline" && pipelineTemplateService != null) {
+        // If possible, initialize the config with a previous execution trigger context, to be able to resolve
+        // dynamic parameters in jinja expressions
+        try {
+          def previousExecution = pipelineTemplateService.retrievePipelineOrNewestExecution(pipeline.executionId, pipeline.id)
+          pipeline.trigger = previousExecution.trigger
+          pipeline.executionId = previousExecution.id
+        } catch (ExecutionNotFoundException | IllegalArgumentException _) {
+          log.info("Could not initialize pipeline template config from previous execution context.")
+        }
+      }
     }
 
     if (!pipeline.trigger.type) {
@@ -130,7 +145,7 @@ class OperationsController {
     }
 
     if (pipeline.trigger.parentPipelineId && !pipeline.trigger.parentExecution) {
-      Pipeline parentExecution = executionRepository.retrievePipeline(pipeline.trigger.parentPipelineId)
+      def parentExecution = executionRepository.retrieve(PIPELINE, pipeline.trigger.parentPipelineId)
       if (parentExecution) {
         pipeline.trigger.isPipeline         = true
         pipeline.trigger.parentStatus       = parentExecution.status
@@ -148,8 +163,8 @@ class OperationsController {
         pipeline.trigger.parameters[it.name] = pipeline.trigger.parameters.containsKey(it.name) ? pipeline.trigger.parameters[it.name] : it.default
       }
     }
-    
-    ArtifactResolver.resolveArtifacts(pipeline)
+
+    artifactResolver?.resolveArtifacts(executionRepository, pipeline)
   }
 
   private void getBuildInfo(Map trigger) {
@@ -181,12 +196,16 @@ class OperationsController {
 
   @RequestMapping(value = "/ops", method = RequestMethod.POST)
   Map<String, String> ops(@RequestBody List<Map> input) {
-    startTask([application: null, name: null, appConfig: null, stages: input])
+    def execution = [application: null, name: null, appConfig: null, stages: input]
+    parsePipelineTrigger(executionRepository, buildService, execution)
+    startTask(execution)
   }
 
   @RequestMapping(value = "/ops", consumes = "application/context+json", method = RequestMethod.POST)
   Map<String, String> ops(@RequestBody Map input) {
-    startTask([application: input.application, name: input.description, appConfig: input.appConfig, stages: input.job])
+    def execution = [application: input.application, name: input.description, appConfig: input.appConfig, stages: input.job, trigger: input.trigger ?: [:]]
+    parsePipelineTrigger(executionRepository, buildService, execution)
+    startTask(execution)
   }
 
   @RequestMapping(value = "/webhooks/preconfigured")
@@ -223,7 +242,7 @@ class OperationsController {
     def json = objectMapper.writeValueAsString(config)
     log.info('requested pipeline: {}', json)
 
-    def pipeline = pipelineLauncher.start(json)
+    def pipeline = executionLauncher.start(PIPELINE, json)
 
     [ref: "/pipelines/${pipeline.id}".toString()]
   }
@@ -233,7 +252,7 @@ class OperationsController {
     injectPipelineOrigin(config)
     def json = objectMapper.writeValueAsString(config)
     log.info('requested task:{}', json)
-    def pipeline = orchestrationLauncher.start(json)
+    def pipeline = executionLauncher.start(ORCHESTRATION, json)
     [ref: "/tasks/${pipeline.id}".toString()]
   }
 

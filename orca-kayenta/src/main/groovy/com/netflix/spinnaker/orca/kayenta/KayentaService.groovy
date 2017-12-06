@@ -16,27 +16,20 @@
 
 package com.netflix.spinnaker.orca.kayenta
 
-import com.netflix.spinnaker.orca.pipeline.model.Pipeline
-import retrofit.client.Response
+import com.netflix.spinnaker.orca.pipeline.model.Execution
 import retrofit.http.*
 
 interface KayentaService {
 
-  @POST("/canary")
-  Response create(@Query("metricsAccountName") String metricsAccountName,
-                  @Query("storageAccountName") String storageAccountName,
-                  @Query("canaryConfigId") String canaryConfigId,
-                  @Query("controlScope") String controlScope,
-                  @Query("experimentScope") String experimentScope,
-                  @Query("startTimeIso") String startTimeIso,
-                  @Query("endTimeIso") String endTimeIso,
-                  @Query("step") String step,
-                  @Body Map<String, String> extendedScopeParams,
-                  @Query("scoreThresholdPass") String scoreThresholdPass,
-                  @Query("scoreThresholdMarginal") String scoreThresholdMarginal)
+  @POST("/canary/{canaryConfigId}")
+  Map create(@Path("canaryConfigId") String canaryConfigId,
+             @Query("metricsAccountName") String metricsAccountName,
+             @Query("configurationAccountName") String configurationAccountName,
+             @Query("storageAccountName") String storageAccountName,
+             @Body Map<String, String> canaryExecutionRequest)
 
   @GET("/pipelines/{executionId}")
-  Pipeline getPipelineExecution(@Path("executionId") String executionId)
+  Execution getPipelineExecution(@Path("executionId") String executionId)
 
   @PUT("/pipelines/{executionId}/cancel")
   Map cancelPipelineExecution(@Path("executionId") String executionId, @Body String ignored)

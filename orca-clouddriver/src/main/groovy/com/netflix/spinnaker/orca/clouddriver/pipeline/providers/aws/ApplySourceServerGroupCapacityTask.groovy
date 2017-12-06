@@ -20,6 +20,7 @@ package com.netflix.spinnaker.orca.clouddriver.pipeline.providers.aws
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.netflix.spinnaker.moniker.Moniker
 import com.netflix.spinnaker.orca.clouddriver.pipeline.servergroup.ResizeServerGroupStage
 import com.netflix.spinnaker.orca.clouddriver.tasks.servergroup.AbstractServerGroupTask
 import com.netflix.spinnaker.orca.clouddriver.utils.OortHelper
@@ -30,6 +31,7 @@ import groovy.util.logging.Slf4j
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.stereotype.Component
 import static com.netflix.spinnaker.orca.pipeline.StageDefinitionBuilder.getType
+import static com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType.PIPELINE
 
 @Slf4j
 @Component
@@ -77,6 +79,12 @@ class ApplySourceServerGroupCapacityTask extends AbstractServerGroupTask {
       log.error("Unable to apply source server group capacity (executionId: ${stage.execution.id})", e)
       return null
     }
+  }
+
+  @Override
+  Moniker convertMoniker(Stage stage) {
+    // Used in AbstractServerGroupTask.execute() but not needed here.
+    return null;
   }
 
   /**
@@ -133,7 +141,7 @@ class ApplySourceServerGroupCapacityTask extends AbstractServerGroupTask {
       def pipelineStage = stage.execution.stages.find {
         it.type == "pipeline" && it.parentStageId == deployStage.id
       }
-      def pipeline = executionRepository.retrievePipeline(pipelineStage.context.executionId as String)
+      def pipeline = executionRepository.retrieve(PIPELINE, pipelineStage.context.executionId as String)
       deployStage = pipeline.stages.find {
         it.context.type == "createServerGroup" && it.context.containsKey("deploy.server.groups")
       }

@@ -23,7 +23,6 @@ import com.netflix.spinnaker.orca.clouddriver.pipeline.servergroup.support.Targe
 import com.netflix.spinnaker.orca.front50.pipeline.PipelineStage
 import com.netflix.spinnaker.orca.kato.pipeline.support.ResizeStrategy
 import com.netflix.spinnaker.orca.pipeline.WaitStage
-import com.netflix.spinnaker.orca.pipeline.model.Execution
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import com.netflix.spinnaker.orca.pipeline.model.SyntheticStageOwner
 import groovy.util.logging.Slf4j
@@ -47,7 +46,7 @@ class RollingRedBlackStrategy implements Strategy, ApplicationContextAware {
   @Autowired
   WaitStage waitStage
 
-  @Autowired
+  @Autowired(required = false)
   PipelineStage pipelineStage
 
   @Autowired
@@ -57,7 +56,11 @@ class RollingRedBlackStrategy implements Strategy, ApplicationContextAware {
   TargetServerGroupResolver targetServerGroupResolver
 
   @Override
-  <T extends Execution<T>> List<Stage<T>> composeFlow(Stage<T> stage) {
+  List<Stage> composeFlow(Stage stage) {
+    if (!pipelineStage) {
+      throw new IllegalStateException("Rolling red/black cannot be run without front50 enabled. Please set 'front50.enabled: true' in your orca config.")
+    }
+
     def stages = []
     def stageData = stage.mapTo(RollingRedBlackStageData)
     def cleanupConfig = AbstractDeployStrategyStage.CleanupConfig.fromStage(stage)
@@ -113,13 +116,14 @@ class RollingRedBlackStrategy implements Strategy, ApplicationContextAware {
         source        : source,
         targetLocation: cleanupConfig.location,
         scalePct      : p,
-        pinCapacity   : p < 100 // if p = 100, capacity should be unpinned
+        pinCapacity   : p < 100, // if p = 100, capacity should be unpinned,
+        useNameAsLabel: true     // hint to deck that it should _not_ override the name
       ]
 
       def resizeStage = newStage(
         stage.execution,
         resizeServerGroupStage.type,
-        "Grow to $p% Desired Size",
+        "Grow to $p% of Desired Size",
         resizeContext,
         stage,
         SyntheticStageOwner.STAGE_AFTER
@@ -177,6 +181,7 @@ class RollingRedBlackStrategy implements Strategy, ApplicationContextAware {
       ]
 
       def pipelineContext = [
+        application        : stageData.pipelineBeforeCleanup.application,
         pipelineApplication: stageData.pipelineBeforeCleanup.application,
         pipelineId         : stageData.pipelineBeforeCleanup.pipelineId,
         pipelineParameters : [
