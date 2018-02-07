@@ -40,7 +40,6 @@ import com.netflix.spinnaker.orca.q.CompleteExecution
 import com.netflix.spinnaker.orca.q.CompleteStage
 import com.netflix.spinnaker.orca.q.ContinueParentStage
 import com.netflix.spinnaker.orca.q.DummyTask
-import com.netflix.spinnaker.orca.q.Queue
 import com.netflix.spinnaker.orca.q.RunTask
 import com.netflix.spinnaker.orca.q.StartStage
 import com.netflix.spinnaker.orca.q.buildSyntheticStages
@@ -54,6 +53,7 @@ import com.netflix.spinnaker.orca.q.stageWithParallelBranches
 import com.netflix.spinnaker.orca.q.stageWithSyntheticAfter
 import com.netflix.spinnaker.orca.q.stageWithSyntheticBefore
 import com.netflix.spinnaker.orca.time.fixedClock
+import com.netflix.spinnaker.q.Queue
 import com.netflix.spinnaker.spek.and
 import com.netflix.spinnaker.spek.shouldEqual
 import com.nhaarman.mockito_kotlin.any
@@ -468,6 +468,69 @@ object CompleteStageHandlerTest : SubjectSpek<CompleteStageHandler>({
             it.status shouldEqual taskStatus
           })
         }
+      }
+    }
+
+    describe("when none of a stage's tasks ever started") {
+      val pipeline = pipeline {
+        application = "foo"
+        stage {
+          refId = "1"
+          type = multiTaskStage.type
+          multiTaskStage.plan(this)
+          tasks[0].status = NOT_STARTED
+          tasks[1].status = NOT_STARTED
+          tasks[2].status = NOT_STARTED
+          status = RUNNING
+        }
+        stage {
+          refId = "2"
+          requisiteStageRefIds = listOf("1")
+          type = singleTaskStage.type
+        }
+      }
+      val message = CompleteStage(pipeline.stageByRef("1"))
+
+      beforeGroup {
+        whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
+      }
+
+      afterGroup(::resetMocks)
+
+      on("receiving the message") {
+        subject.handle(message)
+      }
+
+      it("updates the stage state") {
+        verify(repository).storeStage(check {
+          it.status shouldEqual TERMINAL
+          it.endTime shouldEqual clock.millis()
+        })
+      }
+
+      it("does not run any downstream stages") {
+        verify(queue, never()).push(isA<StartStage>())
+      }
+
+      it("fails the execution") {
+        verify(queue).push(CompleteExecution(
+          message.executionType,
+          message.executionId,
+          "foo"
+        ))
+      }
+
+      it("runs the stage's cancellation routine") {
+        verify(queue).push(CancelStage(message))
+      }
+
+      it("publishes an event") {
+        verify(publisher).publishEvent(check<StageComplete> {
+          it.executionType shouldEqual pipeline.type
+          it.executionId shouldEqual pipeline.id
+          it.stageId shouldEqual message.stageId
+          it.status shouldEqual TERMINAL
+        })
       }
     }
 

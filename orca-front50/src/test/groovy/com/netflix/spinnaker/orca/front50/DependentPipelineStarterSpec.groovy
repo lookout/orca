@@ -17,8 +17,11 @@
 package com.netflix.spinnaker.orca.front50
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.netflix.spinnaker.orca.jackson.OrcaObjectMapper
 import com.netflix.spinnaker.orca.pipeline.ExecutionLauncher
 import com.netflix.spinnaker.orca.pipeline.model.Execution
+import com.netflix.spinnaker.orca.pipeline.model.ManualTrigger
+import com.netflix.spinnaker.orca.pipeline.model.Trigger
 import com.netflix.spinnaker.orca.pipeline.util.ContextParameterProcessor
 import com.netflix.spinnaker.security.AuthenticatedRequest
 import org.slf4j.MDC
@@ -32,7 +35,7 @@ class DependentPipelineStarterSpec extends Specification {
   @Subject
   DependentPipelineStarter dependentPipelineStarter
 
-  ObjectMapper mapper = new ObjectMapper()
+  ObjectMapper mapper = OrcaObjectMapper.newInstance()
 
   def "should propagate credentials from explicit pipeline invocation ('run pipeline' stage)"() {
     setup:
@@ -49,7 +52,7 @@ class DependentPipelineStarterSpec extends Specification {
         return pipeline {
           name = p.name
           id = p.name
-          trigger.putAll(p.trigger)
+          trigger = mapper.convertValue(p.trigger, Trigger)
         }
       }
     }
@@ -96,7 +99,7 @@ class DependentPipelineStarterSpec extends Specification {
         return pipeline {
           name = p.name
           id = p.name
-          trigger.putAll(p.trigger)
+          trigger = mapper.convertValue(p.trigger, Trigger)
         }
       }
     }
@@ -123,5 +126,39 @@ class DependentPipelineStarterSpec extends Specification {
     result?.name == "triggered"
     gotMDC["X-SPINNAKER-USER"] == "parentUser"
     gotMDC["X-SPINNAKER-ACCOUNTS"] == "acct1,acct2"
+  }
+
+  def "should not do anything if parent was a dry run execution"() {
+    given:
+    def triggeredPipelineConfig = [name: "triggered", id: "triggered"]
+    def parentPipeline = pipeline {
+      name = "parent"
+      trigger = new ManualTrigger(null, "fzlem@netflix.com", [:], [], [])
+      trigger.otherProperties.dryRun = true
+      authentication = new Execution.AuthenticationDetails("parentUser", "acct1", "acct2")
+    }
+    def executionLauncher = Mock(ExecutionLauncher)
+    def applicationContext = new StaticApplicationContext()
+    applicationContext.beanFactory.registerSingleton("pipelineLauncher", executionLauncher)
+    dependentPipelineStarter = new DependentPipelineStarter(
+      objectMapper: mapper,
+      applicationContext: applicationContext,
+      contextParameterProcessor: new ContextParameterProcessor()
+    )
+
+    when:
+    def result = dependentPipelineStarter.trigger(
+      triggeredPipelineConfig,
+      null /*user*/,
+      parentPipeline,
+      [:],
+      "parent"
+    )
+
+    then:
+    result == null
+
+    and:
+    0 * executionLauncher._
   }
 }

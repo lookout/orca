@@ -17,16 +17,20 @@
 package com.netflix.spinnaker.orca.pipeline.util
 
 import com.netflix.spinnaker.orca.ExecutionStatus
+import com.netflix.spinnaker.orca.jackson.OrcaObjectMapper
 import com.netflix.spinnaker.orca.pipeline.expressions.ExpressionEvaluationSummary
 import com.netflix.spinnaker.orca.pipeline.expressions.ExpressionTransform
 import com.netflix.spinnaker.orca.pipeline.expressions.ExpressionsSupport
 import com.netflix.spinnaker.orca.pipeline.expressions.SpelHelperFunctionException
 import com.netflix.spinnaker.orca.pipeline.model.Execution
+import com.netflix.spinnaker.orca.pipeline.model.JenkinsTrigger
 import org.springframework.expression.spel.SpelEvaluationException
 import spock.lang.Specification
 import spock.lang.Subject
 import spock.lang.Unroll
 import static com.netflix.spinnaker.orca.ExecutionStatus.SUCCEEDED
+import static com.netflix.spinnaker.orca.pipeline.model.JenkinsTrigger.BuildInfo
+import static com.netflix.spinnaker.orca.pipeline.model.JenkinsTrigger.SourceControl
 import static com.netflix.spinnaker.orca.test.model.ExecutionBuilder.pipeline
 import static com.netflix.spinnaker.orca.test.model.ExecutionBuilder.stage
 
@@ -275,8 +279,9 @@ class ContextParameterProcessorSpec extends Specification {
 
   @Unroll
   def "correctly compute scmInfo attribute"() {
-
     given:
+    context.trigger.buildInfo = new BuildInfo("name", 1, "http://jenkins", [], scm, false, "SUCCESS")
+
     def source = ['branch': '${scmInfo.branch}']
 
     when:
@@ -286,21 +291,33 @@ class ContextParameterProcessorSpec extends Specification {
     result.branch == expectedBranch
 
     where:
-    context                                                                                                 | expectedBranch
-    [:]                                                                                                     | '${scmInfo.branch}'
-    [trigger: [buildInfo: [scm: [[branch: 'branch1']]]]]                                                    | 'branch1'
-    [trigger: [buildInfo: [scm: [[branch: 'branch1'], [branch: 'master']]]]]                                | 'branch1'
-    [trigger: [buildInfo: [scm: [[branch: 'develop'], [branch: 'master']]]]]                                | 'develop'
-    [trigger: [buildInfo: [scm: [[branch: 'jenkinsBranch']]]], buildInfo: [scm: [[branch: 'buildBranch']]]] | 'buildBranch'
+    scm                                                                                    | expectedBranch
+    []                                                                                     | '${scmInfo.branch}'
+    [new SourceControl("", "branch1", "")]                                                 | 'branch1'
+    [new SourceControl("", "branch1", ""), new SourceControl("", "master", "")]            | 'branch1'
+    [new SourceControl("", "develop", ""), new SourceControl("", "master", "")]            | 'develop'
+    [new SourceControl("", "buildBranch", ""), new SourceControl("", "jenkinsBranch", "")] | 'buildBranch'
+
+    context = [
+      trigger: new JenkinsTrigger(
+        "master",
+        "job",
+        1,
+        null,
+        "user",
+        [:],
+        []
+      )
+    ]
   }
 
   def "ignores deployment details that have not yet ran"() {
     given:
-    def source = ['deployed': '${deployedServerGroups}']
-    def context = [execution: execution]
+    def source = [deployed: '${deployedServerGroups}']
+    def ctx = [execution: OrcaObjectMapper.newInstance().convertValue(execution, Map)]
 
     when:
-    def result = contextParameterProcessor.process(source, context, true)
+    def result = contextParameterProcessor.process(source, ctx, true)
     def summary = result.expressionEvaluationSummary as Map<String, List>
 
     then:
@@ -310,27 +327,21 @@ class ContextParameterProcessorSpec extends Specification {
 
     where:
     execution = [
-      "stages": [
+      stages: [
         [
-          "type"         : "deploy",
-          "name"         : "Deploy in us-east-1",
-          "context"      : [
-            "capacity"           : [
-              "desired": 1,
-              "max"    : 1,
-              "min"    : 1
-            ],
+          type         : "deploy",
+          name         : "Deploy in us-east-1",
+          context      : [
+            capacity             : [desired: 1, max: 1, min: 1],
             "deploy.account.name": "test",
-            "stack"              : "test",
-            "strategy"           : "highlander",
-            "subnetType"         : "internal",
-            "suspendedProcesses" : [],
-            "terminationPolicies": [
-              "Default"
-            ],
-            "type"               : "linearDeploy"
+            stack                : "test",
+            strategy             : "highlander",
+            subnetType           : "internal",
+            suspendedProcesses   : [],
+            terminationPolicies  : ["Default"],
+            type                 : "linearDeploy"
           ],
-          "parentStageId": "dca27ddd-ce7d-42a0-a1db-5b43c6b2f0c7",
+          parentStageId: "dca27ddd-ce7d-42a0-a1db-5b43c6b2f0c7",
         ]
       ]
     ]

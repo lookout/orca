@@ -24,8 +24,10 @@ import com.netflix.spinnaker.orca.events.TaskComplete
 import com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType.PIPELINE
 import com.netflix.spinnaker.orca.pipeline.model.Task
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository
+import com.netflix.spinnaker.orca.pipeline.util.ContextParameterProcessor
 import com.netflix.spinnaker.orca.q.*
 import com.netflix.spinnaker.orca.time.fixedClock
+import com.netflix.spinnaker.q.Queue
 import com.netflix.spinnaker.spek.and
 import com.netflix.spinnaker.spek.shouldEqual
 import com.nhaarman.mockito_kotlin.*
@@ -44,7 +46,7 @@ object CompleteTaskHandlerTest : SubjectSpek<CompleteTaskHandler>({
   val clock = fixedClock()
 
   subject(GROUP) {
-    CompleteTaskHandler(queue, repository, publisher, clock)
+    CompleteTaskHandler(queue, repository, ContextParameterProcessor(), publisher, clock)
   }
 
   fun resetMocks() = reset(queue, repository, publisher)

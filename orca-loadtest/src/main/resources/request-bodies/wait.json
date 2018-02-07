@@ -10,7 +10,5 @@
       "waitTime": 5
     }
   ],
-  "limitConcurrent": true,
-  "appConfig": {},
-  "executionEngine": "v3"
+  "limitConcurrent": true
 }

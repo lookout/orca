@@ -19,9 +19,10 @@ package com.netflix.spinnaker.orca.pipeline.persistence
 import java.util.concurrent.CountDownLatch
 import com.netflix.spectator.api.NoopRegistry
 import com.netflix.spinnaker.kork.jedis.EmbeddedRedis
+import com.netflix.spinnaker.kork.jedis.JedisClientDelegate
+import com.netflix.spinnaker.kork.jedis.RedisClientDelegate
 import com.netflix.spinnaker.orca.ExecutionStatus
-import com.netflix.spinnaker.orca.pipeline.model.Execution
-import com.netflix.spinnaker.orca.pipeline.model.Stage
+import com.netflix.spinnaker.orca.pipeline.model.*
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository.ExecutionCriteria
 import com.netflix.spinnaker.orca.pipeline.persistence.jedis.JedisExecutionRepository
 import redis.clients.jedis.Jedis
@@ -131,7 +132,7 @@ abstract class ExecutionRepositoryTck<T extends ExecutionRepository> extends Spe
     def pipeline = pipeline {
       application = "orca"
       name = "dummy-pipeline"
-      trigger.putAll(name: "some-jenkins-job", lastBuildLabel: 1)
+      trigger = new JenkinsTrigger("master", "job", 1, null, null, [:], [])
       stage {
         type = "one"
         context = [foo: "foo"]
@@ -428,8 +429,9 @@ abstract class ExecutionRepositoryTck<T extends ExecutionRepository> extends Spe
 
   def "should return task ref for currently running orchestration by correlation id"() {
     given:
-    def execution = orchestration()
-    execution.trigger['correlationId'] = 'covfefe'
+    def execution = orchestration {
+      trigger = new ManualTrigger('covfefe', null, [:], [], [])
+    }
     repository.store(execution)
     repository.updateStatus(execution.id, RUNNING)
 
@@ -450,8 +452,7 @@ abstract class ExecutionRepositoryTck<T extends ExecutionRepository> extends Spe
   def "parses the parent execution of a pipeline trigger"() {
     given:
     def execution = pipeline {
-      trigger["type"] = "pipeline"
-      trigger["parentExecution"] = pipeline()
+      trigger = new PipelineTrigger(pipeline(), [:])
     }
     repository.store(execution)
 
@@ -485,12 +486,15 @@ class JedisExecutionRepositorySpec extends ExecutionRepositoryTck<JedisExecution
   Pool<Jedis> jedisPool = embeddedRedis.pool
   Pool<Jedis> jedisPoolPrevious = embeddedRedisPrevious.pool
 
+  RedisClientDelegate redisClientDelegate = new JedisClientDelegate(jedisPool)
+  Optional<RedisClientDelegate> previousRedisClientDelegate = Optional.of(new JedisClientDelegate(jedisPoolPrevious))
+
   @AutoCleanup
   def jedis = jedisPool.resource
 
   @Override
   JedisExecutionRepository createExecutionRepository() {
-    new JedisExecutionRepository(new NoopRegistry(), jedisPool, Optional.of(jedisPoolPrevious), 1, 50)
+    return new JedisExecutionRepository(new NoopRegistry(), redisClientDelegate, previousRedisClientDelegate, 1, 50)
   }
 
   def "cleans up indexes of non-existent executions"() {
@@ -569,7 +573,7 @@ class JedisExecutionRepositorySpec extends ExecutionRepositoryTck<JedisExecution
     }
 
     and:
-    def previousRepository = new JedisExecutionRepository(new NoopRegistry(), jedisPoolPrevious, Optional.empty(), 1, 50)
+    def previousRepository = new JedisExecutionRepository(new NoopRegistry(), previousRedisClientDelegate.get(), Optional.empty(), 1, 50)
     3.times {
       previousRepository.store(orchestration { application = "orca" })
     }
@@ -590,7 +594,7 @@ class JedisExecutionRepositorySpec extends ExecutionRepositoryTck<JedisExecution
     repository.store(orchestration1)
 
     and:
-    def previousRepository = new JedisExecutionRepository(new NoopRegistry(), jedisPoolPrevious, Optional.empty(), 1, 50)
+    def previousRepository = new JedisExecutionRepository(new NoopRegistry(), previousRedisClientDelegate.get(), Optional.empty(), 1, 50)
     def orchestration2 = orchestration { application = "orca" }
     previousRepository.store(orchestration2)
 
@@ -630,7 +634,7 @@ class JedisExecutionRepositorySpec extends ExecutionRepositoryTck<JedisExecution
     })
 
     and:
-    def previousRepository = new JedisExecutionRepository(new NoopRegistry(), jedisPoolPrevious, Optional.empty(), 1, 50)
+    def previousRepository = new JedisExecutionRepository(new NoopRegistry(), previousRedisClientDelegate.get(), Optional.empty(), 1, 50)
     previousRepository.store(pipeline {
       application = "orca"
       pipelineConfigId = "pipeline-1"
@@ -667,7 +671,7 @@ class JedisExecutionRepositorySpec extends ExecutionRepositoryTck<JedisExecution
     repository.store(pipeline1)
 
     and:
-    def previousRepository = new JedisExecutionRepository(new NoopRegistry(), jedisPoolPrevious, Optional.empty(), 1, 50)
+    def previousRepository = new JedisExecutionRepository(new NoopRegistry(), previousRedisClientDelegate.get(), Optional.empty(), 1, 50)
     def pipeline2 = pipeline {
       application = "orca"
       pipelineConfigId = "pipeline-1"
@@ -822,7 +826,7 @@ class JedisExecutionRepositorySpec extends ExecutionRepositoryTck<JedisExecution
     }
   }
 
-  def "can save a stage with all data"() {
+  def "can save a stage with all data and update stage context"() {
     given:
     def pipeline = pipeline {
       application = "orca"
@@ -839,9 +843,20 @@ class JedisExecutionRepositorySpec extends ExecutionRepositoryTck<JedisExecution
     stage.refId = "1<1"
 
     when:
-    repository.storeStage(stage)
+    repository.addStage(stage)
 
     then:
     notThrown(Exception)
+
+    when:
+    stage.setContext([foo: 'bar'])
+    repository.updateStageContext(stage)
+
+    then:
+    def stored = repository.retrieve(PIPELINE, pipeline.id)
+
+    and:
+    stored.stageById(stage.id).context == [foo: 'bar']
+
   }
 }

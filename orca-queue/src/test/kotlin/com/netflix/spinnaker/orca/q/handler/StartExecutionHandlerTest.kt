@@ -21,6 +21,7 @@ import com.netflix.spinnaker.orca.events.ExecutionComplete
 import com.netflix.spinnaker.orca.events.ExecutionStarted
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository
 import com.netflix.spinnaker.orca.q.*
+import com.netflix.spinnaker.q.Queue
 import com.netflix.spinnaker.spek.shouldEqual
 import com.nhaarman.mockito_kotlin.*
 import org.jetbrains.spek.api.dsl.context
@@ -174,6 +175,42 @@ object StartExecutionHandlerTest : SubjectSpek<StartExecutionHandler>({
           verify(queue, times(2)).push(capture())
           allValues.map { it.stageId }.toSet() shouldEqual pipeline.stages.map { it.id }.toSet()
         }
+      }
+    }
+
+    context("with no initial stages") {
+      val pipeline = pipeline {
+        stage {
+          type = singleTaskStage.type
+          requisiteStageRefIds = listOf("1")
+        }
+        stage {
+          type = singleTaskStage.type
+          requisiteStageRefIds = listOf("1")
+        }
+      }
+      val message = StartExecution(pipeline.type, pipeline.id, "foo")
+
+      beforeGroup {
+        whenever(repository.retrieve(message.executionType, message.executionId)) doReturn pipeline
+      }
+
+      afterGroup(::resetMocks)
+
+      action("the handler receives a message") {
+        subject.handle(message)
+      }
+
+      it("marks the execution as TERMINAL") {
+        verify(repository, times(1)).updateStatus(pipeline.id, ExecutionStatus.TERMINAL)
+      }
+
+      it("publishes an event with TERMINAL status") {
+        verify(publisher).publishEvent(check<ExecutionComplete> {
+          it.executionType shouldEqual message.executionType
+          it.executionId shouldEqual message.executionId
+          it.status shouldEqual ExecutionStatus.TERMINAL
+        })
       }
     }
   }

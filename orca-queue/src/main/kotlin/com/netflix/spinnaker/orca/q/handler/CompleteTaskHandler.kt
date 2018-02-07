@@ -16,11 +16,23 @@
 
 package com.netflix.spinnaker.orca.q.handler
 
-import com.netflix.spinnaker.orca.ExecutionStatus.*
+import com.netflix.spinnaker.orca.ExecutionStatus.NOT_STARTED
+import com.netflix.spinnaker.orca.ExecutionStatus.REDIRECT
+import com.netflix.spinnaker.orca.ExecutionStatus.SUCCEEDED
 import com.netflix.spinnaker.orca.events.TaskComplete
 import com.netflix.spinnaker.orca.pipeline.model.Stage
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository
-import com.netflix.spinnaker.orca.q.*
+import com.netflix.spinnaker.orca.pipeline.util.ContextParameterProcessor
+import com.netflix.spinnaker.orca.q.CompleteStage
+import com.netflix.spinnaker.orca.q.CompleteTask
+import com.netflix.spinnaker.orca.q.NoDownstreamTasks
+import com.netflix.spinnaker.orca.q.StartStage
+import com.netflix.spinnaker.orca.q.StartTask
+import com.netflix.spinnaker.orca.q.firstAfterStages
+import com.netflix.spinnaker.orca.q.get
+import com.netflix.spinnaker.orca.q.nextTask
+import com.netflix.spinnaker.q.Queue
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Component
 import java.time.Clock
@@ -29,24 +41,26 @@ import java.time.Clock
 class CompleteTaskHandler(
   override val queue: Queue,
   override val repository: ExecutionRepository,
-  private val publisher: ApplicationEventPublisher,
+  override val contextParameterProcessor: ContextParameterProcessor,
+  @Qualifier("queueEventPublisher") private val publisher: ApplicationEventPublisher,
   private val clock: Clock
-) : MessageHandler<CompleteTask> {
+) : OrcaMessageHandler<CompleteTask>, ExpressionAware {
 
   override fun handle(message: CompleteTask) {
     message.withTask { stage, task ->
       task.status = message.status
       task.endTime = clock.millis()
+      val mergedContextStage = stage.withMergedContext()
 
       if (message.status == REDIRECT) {
-        stage.handleRedirect()
+        mergedContextStage.handleRedirect()
       } else {
-        repository.storeStage(stage)
+        repository.storeStage(mergedContextStage)
 
         if (message.status != SUCCEEDED) {
           queue.push(CompleteStage(message))
         } else if (task.isStageEnd) {
-          stage.firstAfterStages().let { afterStages ->
+          mergedContextStage.firstAfterStages().let { afterStages ->
             if (afterStages.isEmpty()) {
               queue.push(CompleteStage(message))
             } else {
@@ -56,7 +70,7 @@ class CompleteTaskHandler(
             }
           }
         } else {
-          stage.nextTask(task).let {
+          mergedContextStage.nextTask(task).let {
             if (it == null) {
               queue.push(NoDownstreamTasks(message))
             } else {
@@ -65,7 +79,7 @@ class CompleteTaskHandler(
           }
         }
 
-        publisher.publishEvent(TaskComplete(this, stage, task))
+        publisher.publishEvent(TaskComplete(this, mergedContextStage, task))
       }
     }
   }

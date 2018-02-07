@@ -16,7 +16,11 @@
 
 package com.netflix.spinnaker.orca.controllers
 
+import rx.Observable
+
+import javax.servlet.http.HttpServletResponse
 import com.netflix.spinnaker.kork.web.exceptions.InvalidRequestException
+import com.netflix.spinnaker.kork.web.exceptions.ValidationException
 import com.netflix.spinnaker.orca.igor.BuildArtifactFilter
 import com.netflix.spinnaker.orca.igor.BuildService
 import com.netflix.spinnaker.orca.jackson.OrcaObjectMapper
@@ -40,21 +44,18 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders
 import spock.lang.Specification
 import spock.lang.Subject
 import spock.lang.Unroll
-
-import javax.servlet.http.HttpServletResponse
-
 import static com.netflix.spinnaker.orca.ExecutionStatus.CANCELED
 import static com.netflix.spinnaker.orca.ExecutionStatus.SUCCEEDED
 import static com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType
 import static com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType.PIPELINE
 import static com.netflix.spinnaker.orca.test.model.ExecutionBuilder.pipeline
+import static java.lang.String.format
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 
 class OperationsControllerSpec extends Specification {
 
   void setup() {
     MDC.clear()
-    artifactResolver.objectMapper = mapper
   }
 
   def executionLauncher = Mock(ExecutionLauncher)
@@ -63,7 +64,7 @@ class OperationsControllerSpec extends Specification {
   def executionRepository = Mock(ExecutionRepository)
   def pipelineTemplateService = Mock(PipelineTemplateService)
   def webhookService = Mock(WebhookService)
-  def artifactResolver = new ArtifactResolver()
+  def artifactResolver = Mock(ArtifactResolver)
 
   def env = new MockEnvironment()
   def buildArtifactFilter = new BuildArtifactFilter(environment: env)
@@ -127,7 +128,7 @@ class OperationsControllerSpec extends Specification {
       trigger.master == master
       trigger.job == job
       trigger.buildNumber == buildNumber
-      trigger.buildInfo == buildInfo
+      trigger.buildInfo.result == buildInfo.result
     }
 
     where:
@@ -143,7 +144,7 @@ class OperationsControllerSpec extends Specification {
         buildNumber: buildNumber
       ]
     ]
-    buildInfo = [result: "SUCCESS"]
+    buildInfo = [name: job, number: buildNumber, result: "SUCCESS", url: "http://jenkins"]
   }
 
   def "should not get pipeline execution details from trigger if provided"() {
@@ -194,8 +195,6 @@ class OperationsControllerSpec extends Specification {
 
     and:
     with(startedPipeline.trigger) {
-      parentPipelineName == parentPipeline.name
-      parentStatus == 'CANCELED'
       parentExecution != null
       parentExecution.id == "12345"
     }
@@ -204,7 +203,7 @@ class OperationsControllerSpec extends Specification {
     requestedPipeline = [
       application: "covfefe",
       trigger    : [
-        type            : "manual",
+        type            : "pipeline",
         parentPipelineId: "12345"
       ]
     ]
@@ -224,9 +223,6 @@ class OperationsControllerSpec extends Specification {
       status = SUCCEEDED
       id = "12345"
       application = "covfefe"
-      trigger << [
-        type: "travis"
-      ]
     }
 
     when:
@@ -234,13 +230,13 @@ class OperationsControllerSpec extends Specification {
 
     then:
     1 * pipelineTemplateService.retrievePipelineOrNewestExecution("12345", _) >> previousExecution
-    orchestration.trigger.type == "travis"
+    orchestration.trigger.type == "manual"
 
     where:
     requestedPipeline = [
-      id: "54321",
-      plan: true,
-      type: "templatedPipeline",
+      id         : "54321",
+      plan       : true,
+      type       : "templatedPipeline",
       executionId: "12345"
     ]
   }
@@ -267,7 +263,7 @@ class OperationsControllerSpec extends Specification {
       trigger.master == master
       trigger.job == job
       trigger.buildNumber == buildNumber
-      trigger.buildInfo == buildInfo
+      trigger.buildInfo.result == buildInfo.result
       trigger.user == expectedUser
     }
 
@@ -289,7 +285,7 @@ class OperationsControllerSpec extends Specification {
         user       : triggerUser
       ]
     ]
-    buildInfo = [result: "SUCCESS"]
+    buildInfo = [name: job, number: buildNumber, result: "SUCCESS", url: "http://jenkins"]
 
   }
 
@@ -301,7 +297,7 @@ class OperationsControllerSpec extends Specification {
       startedPipeline.id = UUID.randomUUID().toString()
       startedPipeline
     }
-    buildService.getBuild(buildNumber, master, job) >> [result: "SUCCESS"]
+    buildService.getBuild(buildNumber, master, job) >> [name: job, number: buildNumber, result: "SUCCESS", url: "http://jenkins"]
     buildService.getPropertyFile(buildNumber, propertyFile, master, job) >> propertyFileContent
 
     when:
@@ -339,13 +335,15 @@ class OperationsControllerSpec extends Specification {
 
     Map requestedPipeline = [
       trigger: [
-        type      : "manual",
+        type      : "jenkins",
+        master    : "master",
+        job       : "jon",
+        number    : 1,
         properties: [
           key1        : 'val1',
           key2        : 'val2',
           replaceValue: ['val3']
-        ],
-        replaceMe : '${trigger.properties.replaceValue}'
+        ]
       ],
       id     : '${trigger.properties.key1}',
       name   : '${trigger.properties.key2}'
@@ -357,8 +355,6 @@ class OperationsControllerSpec extends Specification {
     then:
     startedPipeline.id == 'val1'
     startedPipeline.name == 'val2'
-    startedPipeline.trigger.replaceMe instanceof ArrayList
-    startedPipeline.trigger.replaceMe.first() == 'val3'
   }
 
   def "processes pipeline parameters"() {
@@ -370,6 +366,7 @@ class OperationsControllerSpec extends Specification {
 
     Map requestedPipeline = [
       trigger: [
+        type      : "manual",
         parameters: [
           key1: 'value1',
           key2: 'value2'
@@ -463,6 +460,69 @@ class OperationsControllerSpec extends Specification {
     startedPipeline.pipelineConfigId == ''
   }
 
+  def "provided trigger can evaluate spel"() {
+    given:
+    Execution startedPipeline = null
+    executionLauncher.start(*_) >> { ExecutionType type, String json ->
+      startedPipeline = mapper.readValue(json, Execution)
+      startedPipeline.id = UUID.randomUUID().toString()
+      startedPipeline
+    }
+    executionRepository.retrievePipelinesForPipelineConfigId(*_) >> Observable.empty()
+    ArtifactResolver realArtifactResolver = new ArtifactResolver(mapper, executionRepository)
+
+    // can't use @subject, since we need to test the behavior of otherwise mocked-out 'artifactResolver'
+    def tempController = new OperationsController(
+        objectMapper: mapper,
+        buildService: buildService,
+        buildArtifactFilter: buildArtifactFilter,
+        executionRepository: executionRepository,
+        pipelineTemplateService: pipelineTemplateService,
+        executionLauncher: executionLauncher,
+        contextParameterProcessor: new ContextParameterProcessor(),
+        webhookService: webhookService,
+        artifactResolver: new ArtifactResolver(mapper, executionRepository)
+    )
+
+    def reference = 'gs://bucket'
+    def name = 'name'
+    def id = 'id'
+
+    Map requestedPipeline = [
+        pipelineConfigId: "some-id",
+
+
+        expectedArtifacts: [[
+            id: id,
+
+            matchArtifact: [
+                name: "not $name".toString(),
+                reference: "not $reference".toString()
+            ],
+
+            defaultArtifact: [
+                reference: '${parameters.reference}'
+            ],
+
+            useDefaultArtifact: true
+        ]],
+
+        trigger         : [
+            parameters: [
+                reference: reference
+            ],
+
+            expectedArtifactIds: [ id ]
+        ],
+    ]
+
+    when:
+    tempController.orchestrate(requestedPipeline, Mock(HttpServletResponse))
+
+    then:
+    startedPipeline.getTrigger().resolvedExpectedArtifacts[0].boundArtifact.reference == reference
+  }
+
   @Unroll
   def 'limits artifacts in buildInfo based on environment configuration'() {
     given:
@@ -485,9 +545,7 @@ class OperationsControllerSpec extends Specification {
       trigger.master == master
       trigger.job == job
       trigger.buildNumber == buildNumber
-      trigger.buildInfo.artifacts == expectedArtifacts.collect {
-        [fileName: it]
-      }
+      trigger.buildInfo.artifacts.fileName == expectedArtifacts
     }
 
     where:
@@ -511,15 +569,15 @@ class OperationsControllerSpec extends Specification {
         user       : 'foo'
       ]
     ]
-    buildInfo = [result: "SUCCESS", artifacts: [
-      [fileName: 'foo1.deb'],
-      [fileName: 'foo2.rpm'],
-      [fileName: 'foo3.properties'],
-      [fileName: 'foo4.yml'],
-      [fileName: 'foo5.json'],
-      [fileName: 'foo6.xml'],
-      [fileName: 'foo7.txt'],
-      [fileName: 'foo8.nupkg'],
+    buildInfo = [name: job, number: buildNumber, url: "http://jenkins", result: "SUCCESS", artifacts: [
+      [fileName: 'foo1.deb', relativePath: "."],
+      [fileName: 'foo2.rpm', relativePath: "."],
+      [fileName: 'foo3.properties', relativePath: "."],
+      [fileName: 'foo4.yml', relativePath: "."],
+      [fileName: 'foo5.json', relativePath: "."],
+      [fileName: 'foo6.xml', relativePath: "."],
+      [fileName: 'foo7.txt', relativePath: "."],
+      [fileName: 'foo8.nupkg', relativePath: "."],
     ]]
   }
 
@@ -539,10 +597,10 @@ class OperationsControllerSpec extends Specification {
   def "should throw validation exception when templated pipeline contains errors"() {
     given:
     def pipelineConfig = [
-      plan  : true,
-      type  : "templatedPipeline",
+      plan       : true,
+      type       : "templatedPipeline",
       executionId: "12345",
-      errors: [
+      errors     : [
         'things broke': 'because of the way it is'
       ]
     ]
@@ -553,7 +611,57 @@ class OperationsControllerSpec extends Specification {
 
     then:
     thrown(InvalidRequestException)
-    1 * pipelineTemplateService.retrievePipelineOrNewestExecution("12345", null) >> { throw new ExecutionNotFoundException("Not found") }
+    1 * pipelineTemplateService.retrievePipelineOrNewestExecution("12345", null) >> {
+      throw new ExecutionNotFoundException("Not found")
+    }
+    0 * executionLauncher.start(*_)
+  }
+
+  def "should log and re-throw validation error for non-templated pipeline"() {
+    given:
+    def pipelineConfig = [
+      type: PIPELINE,
+      errors: [
+        'things broke': 'because of the way it is'
+      ]
+    ]
+    def response = Mock(HttpServletResponse)
+    Execution failedPipeline = null
+    1 * executionLauncher.fail(*_) >> { ExecutionType type, String json, Throwable t ->
+      failedPipeline = mapper.readValue(json, Execution)
+      failedPipeline.id = UUID.randomUUID().toString()
+      failedPipeline
+    }
+
+    when:
+    controller.orchestrate(pipelineConfig, response)
+
+    then:
+    thrown(ValidationException)
+    0 * executionLauncher.start(*_)
+  }
+
+  def "should log and re-throw missing artifact error"() {
+    given:
+    def pipelineConfig = [
+      type: PIPELINE
+    ]
+    def response = Mock(HttpServletResponse)
+    artifactResolver.resolveArtifacts(*_) >> { Map pipeline ->
+      throw new IllegalStateException(format("Unmatched expected artifact could not be resolved."))
+    }
+    Execution failedPipeline = null
+    1 * executionLauncher.fail(*_) >> { ExecutionType type, String json, Throwable t ->
+      failedPipeline = mapper.readValue(json, Execution)
+      failedPipeline.id = UUID.randomUUID().toString()
+      failedPipeline
+    }
+
+    when:
+    controller.orchestrate(pipelineConfig, response)
+
+    then:
+    thrown(IllegalStateException)
     0 * executionLauncher.start(*_)
   }
 
@@ -583,8 +691,8 @@ class OperationsControllerSpec extends Specification {
       createPreconfiguredWebhook("Webhook #2", "Description #2", "webhook_2")
     ]
     preconfiguredWebhooks == [
-      [label: "Webhook #1", description: "Description #1", type: "webhook_1", waitForCompletion: true, preconfiguredProperties: preconfiguredProperties, noUserConfigurableFields: true],
-      [label: "Webhook #2", description: "Description #2", type: "webhook_2", waitForCompletion: true, preconfiguredProperties: preconfiguredProperties, noUserConfigurableFields: true]
+      [label: "Webhook #1", description: "Description #1", type: "webhook_1", waitForCompletion: true, preconfiguredProperties: preconfiguredProperties, noUserConfigurableFields: true, parameters: null],
+      [label: "Webhook #2", description: "Description #2", type: "webhook_2", waitForCompletion: true, preconfiguredProperties: preconfiguredProperties, noUserConfigurableFields: true, parameters: null]
     ]
   }
 
@@ -596,7 +704,7 @@ class OperationsControllerSpec extends Specification {
       label: label, description: description, type: type,
       url: "a", customHeaders: customHeaders, method: HttpMethod.POST, payload: "b",
       waitForCompletion: true, statusUrlResolution: PreconfiguredWebhookProperties.StatusUrlResolution.webhookResponse,
-      statusUrlJsonPath: "c", statusJsonPath: "d", progressJsonPath: "e", successStatuses: "f", canceledStatuses: "g", terminalStatuses: "h"
+      statusUrlJsonPath: "c", statusJsonPath: "d", progressJsonPath: "e", successStatuses: "f", canceledStatuses: "g", terminalStatuses: "h", parameters: null
     )
   }
 }

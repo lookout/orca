@@ -25,6 +25,7 @@ include "orca-extensionpoint",
   "orca-igor",
   "orca-clouddriver",
   "orca-kayenta",
+  "orca-keel",
   "orca-mine",
   "orca-test",
   "orca-flex",
@@ -33,6 +34,7 @@ include "orca-extensionpoint",
   "orca-applications",
   "orca-queue",
   "orca-queue-redis",
+  "orca-queue-tck",
   "orca-pipelinetemplate",
   "orca-validation"
 
@@ -52,4 +54,3 @@ def setBuildFile(project) {
 rootProject.children.each {
   setBuildFile it
 }
-

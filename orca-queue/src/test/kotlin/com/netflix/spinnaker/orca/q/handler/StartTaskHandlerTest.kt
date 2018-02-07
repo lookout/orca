@@ -20,8 +20,10 @@ import com.netflix.spinnaker.orca.ExecutionStatus.RUNNING
 import com.netflix.spinnaker.orca.events.TaskStarted
 import com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType.PIPELINE
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository
+import com.netflix.spinnaker.orca.pipeline.util.ContextParameterProcessor
 import com.netflix.spinnaker.orca.q.*
 import com.netflix.spinnaker.orca.time.fixedClock
+import com.netflix.spinnaker.q.Queue
 import com.netflix.spinnaker.spek.shouldEqual
 import com.nhaarman.mockito_kotlin.*
 import org.jetbrains.spek.api.dsl.describe
@@ -39,7 +41,7 @@ object StartTaskHandlerTest : SubjectSpek<StartTaskHandler>({
   val clock = fixedClock()
 
   subject(GROUP) {
-    StartTaskHandler(queue, repository, publisher, clock)
+    StartTaskHandler(queue, repository, ContextParameterProcessor(), publisher, clock)
   }
 
   fun resetMocks() = reset(queue, repository, publisher)

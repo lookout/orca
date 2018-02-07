@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+apply from: "$rootDir/gradle/groovy.gradle"
 apply plugin: 'org.springframework.boot'
 apply plugin: 'spinnaker.package'
 
@@ -47,6 +48,7 @@ dependencies {
   compile project(":orca-eureka")
   compile project(":orca-queue-redis")
   compile project(":orca-pipelinetemplate")
+  compile project(":orca-keel")
 
   runtime spinnaker.dependency("kork")
   compile spinnaker.dependency('korkExceptions')

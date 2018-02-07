@@ -16,15 +16,15 @@
 
 package com.netflix.spinnaker.orca.controllers
 
-import javax.servlet.http.HttpServletResponse
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.netflix.spinnaker.kork.web.exceptions.InvalidRequestException
 import com.netflix.spinnaker.kork.web.exceptions.ValidationException
 import com.netflix.spinnaker.orca.extensionpoint.pipeline.PipelinePreprocessor
 import com.netflix.spinnaker.orca.igor.BuildArtifactFilter
 import com.netflix.spinnaker.orca.igor.BuildService
-import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionNotFoundException
 import com.netflix.spinnaker.orca.pipeline.ExecutionLauncher
+import com.netflix.spinnaker.orca.pipeline.model.Trigger
+import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionNotFoundException
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository
 import com.netflix.spinnaker.orca.pipeline.util.ArtifactResolver
 import com.netflix.spinnaker.orca.pipeline.util.ContextParameterProcessor
@@ -37,6 +37,9 @@ import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestMethod
 import org.springframework.web.bind.annotation.RestController
+
+import javax.servlet.http.HttpServletResponse
+
 import static com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType.ORCHESTRATION
 import static com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType.PIPELINE
 import static net.logstash.logback.argument.StructuredArguments.value
@@ -76,15 +79,39 @@ class OperationsController {
 
   @RequestMapping(value = "/orchestrate", method = RequestMethod.POST)
   Map<String, Object> orchestrate(@RequestBody Map pipeline, HttpServletResponse response) {
-    parsePipelineTrigger(executionRepository, buildService, pipeline)
-    Map trigger = pipeline.trigger
+    Exception pipelineError = null
+    try {
+      parseAndValidatePipeline(pipeline)
+    } catch (Exception e) {
+      pipelineError = e
+    }
 
-    boolean plan = pipeline.plan ?: false
+    if (pipeline.plan) {
+      log.info('Not starting pipeline (plan: true): {}', value("pipelineId", pipeline.id))
+      if (pipelineError != null) {
+        throw pipelineError
+      }
+      return pipeline
+    }
+
+    def augmentedContext = [trigger: pipeline.trigger]
+    def processedPipeline = contextParameterProcessor.process(pipeline, augmentedContext, false)
+    processedPipeline.trigger = objectMapper.convertValue(processedPipeline.trigger, Trigger)
+
+    if (pipelineError == null) {
+      startPipeline(processedPipeline)
+    } else {
+      markPipelineFailed(processedPipeline, pipelineError)
+      throw pipelineError
+    }
+  }
+
+  private void parseAndValidatePipeline(Map pipeline) {
+    parsePipelineTrigger(executionRepository, buildService, pipeline)
+
     for (PipelinePreprocessor preprocessor : (pipelinePreprocessors ?: [])) {
       pipeline = preprocessor.process(pipeline)
     }
-
-    pipeline.trigger = trigger
 
     def json = objectMapper.writeValueAsString(pipeline)
     log.info('received pipeline {}:{}', value("pipelineId", pipeline.id), json)
@@ -98,22 +125,9 @@ class OperationsController {
       convertLinearToParallel(pipeline)
     }
 
-    if (plan) {
-      log.info('not starting pipeline (plan: true): {}', value("pipelineId", pipeline.id))
-      if (pipeline.errors != null) {
-        throw new ValidationException("Pipeline template is invalid", pipeline.errors as List<Map<String, Object>>)
-      }
-      return pipeline
-    }
-
-    def augmentedContext = [trigger: pipeline.trigger]
-    def processedPipeline = contextParameterProcessor.process(pipeline, augmentedContext, false)
-
     if (pipeline.errors != null) {
       throw new ValidationException("Pipeline template is invalid", pipeline.errors as List<Map<String, Object>>)
     }
-
-    startPipeline(processedPipeline)
   }
 
   private void parsePipelineTrigger(ExecutionRepository executionRepository, BuildService buildService, Map pipeline) {
@@ -124,7 +138,7 @@ class OperationsController {
         // dynamic parameters in jinja expressions
         try {
           def previousExecution = pipelineTemplateService.retrievePipelineOrNewestExecution(pipeline.executionId, pipeline.id)
-          pipeline.trigger = previousExecution.trigger
+          pipeline.trigger = objectMapper.convertValue(previousExecution.trigger, Map)
           pipeline.executionId = previousExecution.id
         } catch (ExecutionNotFoundException | IllegalArgumentException _) {
           log.info("Could not initialize pipeline template config from previous execution context.")
@@ -165,7 +179,7 @@ class OperationsController {
     }
 
     if (!pipeline.plan) {
-      artifactResolver?.resolveArtifacts(executionRepository, pipeline)
+      artifactResolver?.resolveArtifacts(pipeline)
     }
   }
 
@@ -198,14 +212,14 @@ class OperationsController {
 
   @RequestMapping(value = "/ops", method = RequestMethod.POST)
   Map<String, String> ops(@RequestBody List<Map> input) {
-    def execution = [application: null, name: null, appConfig: null, stages: input]
+    def execution = [application: null, name: null, stages: input]
     parsePipelineTrigger(executionRepository, buildService, execution)
     startTask(execution)
   }
 
   @RequestMapping(value = "/ops", consumes = "application/context+json", method = RequestMethod.POST)
   Map<String, String> ops(@RequestBody Map input) {
-    def execution = [application: input.application, name: input.description, appConfig: input.appConfig, stages: input.job, trigger: input.trigger ?: [:]]
+    def execution = [application: input.application, name: input.description, stages: input.job, trigger: input.trigger ?: [:]]
     parsePipelineTrigger(executionRepository, buildService, execution)
     startTask(execution)
   }
@@ -222,7 +236,8 @@ class OperationsController {
         type: it.type,
         waitForCompletion: it.waitForCompletion,
         preconfiguredProperties: it.preconfiguredProperties,
-        noUserConfigurableFields: it.noUserConfigurableFields()
+        noUserConfigurableFields: it.noUserConfigurableFields(),
+        parameters: it.parameters,
       ]
     }
   }
@@ -245,6 +260,16 @@ class OperationsController {
     log.info('requested pipeline: {}', json)
 
     def pipeline = executionLauncher.start(PIPELINE, json)
+
+    [ref: "/pipelines/${pipeline.id}".toString()]
+  }
+
+  private Map<String, String> markPipelineFailed(Map config, Exception e) {
+    injectPipelineOrigin(config)
+    def json = objectMapper.writeValueAsString(config)
+    log.info('requested pipeline: {}', json)
+
+    def pipeline = executionLauncher.fail(PIPELINE, json, e)
 
     [ref: "/pipelines/${pipeline.id}".toString()]
   }

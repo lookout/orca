@@ -26,12 +26,13 @@ import com.netflix.spinnaker.orca.TaskResult
 import com.netflix.spinnaker.orca.exceptions.ExceptionHandler
 import com.netflix.spinnaker.orca.pipeline.model.Execution.ExecutionType.PIPELINE
 import com.netflix.spinnaker.orca.pipeline.model.Execution.PausedDetails
-import com.netflix.spinnaker.orca.pipeline.model.Stage
+import com.netflix.spinnaker.orca.pipeline.model.ManualTrigger
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository
 import com.netflix.spinnaker.orca.pipeline.util.ContextParameterProcessor
 import com.netflix.spinnaker.orca.pipeline.util.StageNavigator
 import com.netflix.spinnaker.orca.q.*
 import com.netflix.spinnaker.orca.time.fixedClock
+import com.netflix.spinnaker.q.Queue
 import com.netflix.spinnaker.spek.and
 import com.netflix.spinnaker.spek.shouldEqual
 import com.nhaarman.mockito_kotlin.*
@@ -91,7 +92,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
         val taskResult = TaskResult(SUCCEEDED)
 
         beforeGroup {
-          whenever(task.execute(any<Stage>())) doReturn taskResult
+          whenever(task.execute(any())) doReturn taskResult
           whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
         }
 
@@ -113,7 +114,6 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
 
         it("does not update the stage or global context") {
           verify(repository, never()).storeStage(any())
-          verify(repository, never()).storeExecutionContext(any(), any())
         }
       }
 
@@ -122,7 +122,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
         val taskResult = TaskResult(SUCCEEDED, stageOutputs, emptyMap<String, Any>())
 
         beforeGroup {
-          whenever(task.execute(any<Stage>())) doReturn taskResult
+          whenever(task.execute(any())) doReturn taskResult
           whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
         }
 
@@ -137,10 +137,6 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
             stageOutputs shouldEqual it.context
           })
         }
-
-        it("does not update stage outputs or global context") {
-          verify(repository, never()).storeExecutionContext(any(), any())
-        }
       }
 
       and("has outputs") {
@@ -148,7 +144,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
         val taskResult = TaskResult(SUCCEEDED, emptyMap<String, Any>(), outputs)
 
         beforeGroup {
-          whenever(task.execute(any<Stage>())) doReturn taskResult
+          whenever(task.execute(any())) doReturn taskResult
           whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
         }
 
@@ -163,10 +159,6 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
             it.outputs shouldEqual outputs
           })
         }
-
-        it("also updates global context") {
-          verify(repository).storeExecutionContext(pipeline.id, outputs)
-        }
       }
 
       and("outputs a stageTimeoutMs value") {
@@ -177,7 +169,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
         val taskResult = TaskResult(SUCCEEDED, emptyMap<String, Any>(), outputs)
 
         beforeGroup {
-          whenever(task.execute(any<Stage>())) doReturn taskResult
+          whenever(task.execute(any())) doReturn taskResult
           whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
         }
 
@@ -193,11 +185,6 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
           })
         }
 
-        it("does not write stageTimeoutMs to global context") {
-          verify(repository).storeExecutionContext(eq(pipeline.id), check {
-            it shouldMatch has(Map<String, Any>::keys, hasElement("foo") and !hasElement("stageTimeoutMs"))
-          })
-        }
       }
     }
 
@@ -1092,9 +1079,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
 
     given("parameters in the context and in the pipeline") {
       val pipeline = pipeline {
-        trigger["parameters"] = mapOf(
-          "dummy" to "foo"
-        )
+        trigger = ManualTrigger(null, "fzlem", mapOf("dummy" to "foo"), emptyList(), emptyList())
         stage {
           refId = "1"
           type = "jenkins"
@@ -1214,7 +1199,7 @@ object RunTaskHandlerTest : SubjectSpek<RunTaskHandler>({
     val taskResult = TaskResult(RUNNING)
 
     beforeGroup {
-      whenever(task.execute(any<Stage>())) doReturn taskResult
+      whenever(task.execute(any())) doReturn taskResult
       whenever(repository.retrieve(PIPELINE, message.executionId)) doReturn pipeline
       whenever(task.timeout) doReturn timeout.toMillis()
     }

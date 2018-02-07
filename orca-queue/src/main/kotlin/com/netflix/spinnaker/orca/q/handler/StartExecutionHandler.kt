@@ -16,25 +16,27 @@
 
 package com.netflix.spinnaker.orca.q.handler
 
-import com.netflix.spinnaker.orca.ExecutionStatus.CANCELED
-import com.netflix.spinnaker.orca.ExecutionStatus.NOT_STARTED
-import com.netflix.spinnaker.orca.ExecutionStatus.RUNNING
+import com.netflix.spinnaker.orca.ExecutionStatus.*
 import com.netflix.spinnaker.orca.events.ExecutionComplete
 import com.netflix.spinnaker.orca.events.ExecutionStarted
 import com.netflix.spinnaker.orca.pipeline.persistence.ExecutionRepository
-import com.netflix.spinnaker.orca.q.*
+import com.netflix.spinnaker.orca.q.StartExecution
+import com.netflix.spinnaker.orca.q.StartStage
+import com.netflix.spinnaker.orca.q.initialStages
+import com.netflix.spinnaker.q.Queue
+import net.logstash.logback.argument.StructuredArguments.value
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Component
-import net.logstash.logback.argument.StructuredArguments.value
 
 @Component
 class StartExecutionHandler(
   override val queue: Queue,
   override val repository: ExecutionRepository,
-  private val publisher: ApplicationEventPublisher
-) : MessageHandler<StartExecution> {
+  @Qualifier("queueEventPublisher") private val publisher: ApplicationEventPublisher
+) : OrcaMessageHandler<StartExecution> {
 
   override val messageType = StartExecution::class.java
 
@@ -44,21 +46,26 @@ class StartExecutionHandler(
   override fun handle(message: StartExecution) {
     message.withExecution { execution ->
       if (execution.status == NOT_STARTED && !execution.isCanceled) {
-        repository.updateStatus(message.executionId, RUNNING)
+        val initialStages = execution.initialStages()
+        if (initialStages.isEmpty()) {
+          log.warn("No initial stages found (executionId: ${message.executionId})")
+          repository.updateStatus(message.executionId, TERMINAL)
+          publisher.publishEvent(ExecutionComplete(this, message.executionType, message.executionId, TERMINAL))
+          return@withExecution
+        }
 
-        execution
-          .initialStages()
+        repository.updateStatus(message.executionId, RUNNING)
+        initialStages
           .forEach {
             queue.push(StartStage(message, it.id))
           }
-
         publisher.publishEvent(ExecutionStarted(this, message.executionType, message.executionId))
       } else {
         if (execution.status == CANCELED || execution.isCanceled) {
           publisher.publishEvent(ExecutionComplete(this, message.executionType, message.executionId, execution.status))
         } else {
           log.warn("Execution (type: ${message.executionType}, id: {}, status: ${execution.status}, application: {})" +
-            " cannot bes started unless state is NOT_STARTED. Ignoring StartExecution message.",
+            " cannot be started unless state is NOT_STARTED. Ignoring StartExecution message.",
             value("executionId", message.executionId),
             value("application", message.application))
         }
